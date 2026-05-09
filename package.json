@@ -1,0 +1,27 @@
+{
+  "name": "druzy",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Browser port of the ER-301 Geode burst pattern generator (Tone.js + TS)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.42.1",
+    "codemirror": "^6.0.2",
+    "tone": "^15.0.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^8.0.11",
+    "vitest": "^4.1.5"
+  }
+}

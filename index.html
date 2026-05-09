@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>droozy — a geode like</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>droozy</h1>
+      <label>
+        bpm
+        <input id="bpm" type="number" min="30" max="300" step="1" value="120" />
+      </label>
+      <span class="status" id="status">click the grid overlay to start audio</span>
+    </header>
+
+    <main>
+      <section class="repl">
+        <div class="repl-help">
+          <h3>commands</h3>
+          <code>launch(ch, div?, reps?, note?, level?, harm?, env?)</code> — start or replace channel ch (1..6)<br/>
+          <code>stop(ch)</code> · <code>stopAll()</code> — silence one channel or everything<br/>
+          <code>s([1,2,3])</code> — make a sequins (cycles forever)<br/>
+          <code>scales.major / minor / pentatonic / dorian / chromatic</code><br/>
+          <code>scales.akebono / hijaz / kurd / bayati / rast / zen / wuSheng</code> — eastern + percussion<br/>
+          <code>refresh()</code> — redraw the grid after direct state writes<br/>
+          <h3>direct state</h3>
+          <code>engine.channels[0].note = s([0,4,7])</code> — swap a single param live<br/>
+          <code>setScale(scales.akebono)</code> or <code>engine.scale = scales.akebono; refresh()</code> — set global scale (shared by all channels)<br/>
+          <code>engine.quantize = 16</code> — per-fire snap grid (0 = off · events per whole note)<br/>
+          <code>engine.launchGrid = 4</code> — launch alignment grid (the global clock pulse · 0 = off)<br/>
+          <h3>examples</h3>
+          <code>launch(1, 8, 4, 2)</code><br/>
+          <code>setScale(scales.major); launch(1, s([4,3]), -1, s([0,4,7]), 0.7)</code><br/>
+          <code>launch(1, 8, s([4,3]), s([0,4,7]), s([1,0.5]), s([2,2,7]))</code> — harm sequins at position 6
+        </div>
+
+        <h2 class="repl-header">repl</h2>
+        <div id="repl-editor" class="repl-editor" aria-label="javascript repl"></div>
+        <div class="repl-actions">
+          <button id="repl-run" class="repl-btn" type="button">run ▸</button>
+          <button id="repl-clear" class="repl-btn" type="button">clear output</button>
+          <span class="repl-hint">cmd-enter (or ctrl-enter) also runs · console.log mirrored below</span>
+        </div>
+        <div id="repl-output" class="repl-output" aria-live="polite"></div>
+      </section>
+
+      <section class="grid-wrap">
+        <div class="grid-frame">
+          <div id="grid" class="grid" aria-label="monome-style 16x8 grid"></div>
+          <div id="audio-overlay" class="audio-overlay">
+            <button id="start" class="start-btn" type="button">▸ click to start audio</button>
+            <p class="start-hint">browsers block audio until a user gesture · this enables web audio for the session</p>
+          </div>
+        </div>
+        <div class="grid-legend">
+          <div><span class="row-label">rows 0-5</span> per-channel steps · tap to open the step picker</div>
+          <div><span class="row-label">picker</span> rows 0-1 (momentary) · steps / scales / quantize · tap value to set</div>
+          <div><span class="row-label">row 6</span> launch (0-5) · scenes (12-15)</div>
+          <div><span class="row-label">row 7</span> 0-5 param (div · reps · note · level · harm · env) · 6 scale · 7 quantize (double-click off) · 8 mute mode</div>
+          <div><span class="row-label">mute</span> tap row 7 col 8 to enter mute mode · muted steps strobe · tap a step to toggle silence</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
