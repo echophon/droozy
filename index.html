@@ -17,7 +17,7 @@
     </header>
 
     <main>
-      <section class="repl">
+      <div class="top-row">
         <div class="repl-help">
           <h3>commands</h3>
           <code>launch(ch, div?, reps?, note?, level?, harm?, env?)</code> — start or replace channel ch (1..6)<br/>
@@ -37,6 +37,25 @@
           <code>launch(1, 8, s([4,3]), s([0,4,7]), s([1,0.5]), s([2,2,7]))</code> — harm sequins at position 6
         </div>
 
+        <section class="grid-wrap">
+          <div class="grid-frame">
+            <div id="grid" class="grid" aria-label="monome-style 16x8 grid"></div>
+            <div id="audio-overlay" class="audio-overlay">
+              <button id="start" class="start-btn" type="button">▸ click to start audio</button>
+              <p class="start-hint">browsers block audio until a user gesture · this enables web audio for the session</p>
+            </div>
+          </div>
+          <div class="grid-legend">
+            <div><span class="row-label">rows 0-5</span> cols 0-7 = A layer · cols 8-15 = B layer · tap step to edit</div>
+            <div><span class="row-label">picker</span> rows 0-1 (momentary) · steps / scales / quantize · tap value to set</div>
+            <div><span class="row-label">row 6</span> launch (0-5) · scenes (12-15)</div>
+            <div><span class="row-label">row 7</span> 0-5 param (div · reps · note · level · harm · env) · 6 scale · 7 quantize (double-click off) · 8 mute mode</div>
+            <div><span class="row-label">mute</span> tap row 7 col 8 to enter mute mode · muted steps strobe · tap A-layer step (col 0-7) to toggle silence</div>
+          </div>
+        </section>
+      </div>
+
+      <section class="repl">
         <h2 class="repl-header">repl</h2>
         <div id="repl-editor" class="repl-editor" aria-label="javascript repl"></div>
         <div class="repl-actions">
@@ -45,23 +64,6 @@
           <span class="repl-hint">cmd-enter (or ctrl-enter) also runs · console.log mirrored below</span>
         </div>
         <div id="repl-output" class="repl-output" aria-live="polite"></div>
-      </section>
-
-      <section class="grid-wrap">
-        <div class="grid-frame">
-          <div id="grid" class="grid" aria-label="monome-style 16x8 grid"></div>
-          <div id="audio-overlay" class="audio-overlay">
-            <button id="start" class="start-btn" type="button">▸ click to start audio</button>
-            <p class="start-hint">browsers block audio until a user gesture · this enables web audio for the session</p>
-          </div>
-        </div>
-        <div class="grid-legend">
-          <div><span class="row-label">rows 0-5</span> per-channel steps · tap to open the step picker</div>
-          <div><span class="row-label">picker</span> rows 0-1 (momentary) · steps / scales / quantize · tap value to set</div>
-          <div><span class="row-label">row 6</span> launch (0-5) · scenes (12-15)</div>
-          <div><span class="row-label">row 7</span> 0-5 param (div · reps · note · level · harm · env) · 6 scale · 7 quantize (double-click off) · 8 mute mode</div>
-          <div><span class="row-label">mute</span> tap row 7 col 8 to enter mute mode · muted steps strobe · tap a step to toggle silence</div>
-        </div>
       </section>
     </main>
 

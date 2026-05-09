@@ -4,7 +4,7 @@ import { Sequins, sequins } from './sequins';
 import { scales, ScaleName } from './scales';
 
 // Layout reference:
-//   rows 0..5 = per-channel step view of `selectedParam` (left-packed sequins)
+//   rows 0..5 = per-channel step view: cols 0..7 = A layer | cols 8..15 = B layer
 //   row 6     = 0..5 launch | 6..11 unused | 12..15 scenes (stub)
 //   row 7     = 0..5 param (div/reps/note/level/harm/env)
 //             | 6 scale | 7 quantize | 8 MUTE mode | 9 TRUNCATE mode | 10..15 unused
@@ -14,21 +14,14 @@ import { scales, ScaleName } from './scales';
 //   scale picker  — tap row 7 col 6
 //   quantize picker — tap row 7 col 7 (double-click disables instead of opening)
 //
-// MUTE MODIFIER (row 6 col 6)
-//   Tap to latch into mute mode. While latched, taps on channel rows toggle
-//   the noteMute flag at that column. Tap again to exit. The modifier acts on
-//   the per-channel `noteMute` array (parallel to the note sequins) so that
-//   individual notes can be silenced without losing their values.
-//
-// LAYER TOGGLE (row 7 cols 0..5, second press)
-//   Pressing the currently-selected param button again toggles into the B
-//   layer view of that param. Each channel holds a parallel B sequins per
-//   param (default sequins([0])); the engine sums A.next()+B.next() at fire
-//   time. Switching params resets to A. Entering mute mode forces A view
-//   (mute is keyed off A's note positions).
+// MUTE MODIFIER (row 7 col 8)
+//   Tap to latch into mute mode. While latched, taps on A-layer columns (0..7)
+//   toggle the noteMute flag at that step. B-layer columns (8..15) are ignored
+//   in mute mode. Tap again to exit.
 
 type ParamName = 'div' | 'reps' | 'note' | 'level' | 'harm' | 'env';
 const PARAMS: ParamName[] = ['div', 'reps', 'note', 'level', 'harm', 'env'];
+const PAGE_W = GRID_W / 2;  // 8 — one layer per half
 
 const SCALE_BUTTON_COL = 6;
 const QUANTIZE_BUTTON_COL = 7;
@@ -112,7 +105,6 @@ export class GridController {
   private engine: BurstEngine;
   private grid: Grid;
   private selectedParam: ParamName = 'note';
-  private selectedLayer: Layer = 'A';
   private picker: Picker | null = null;
   private muteMode = false;
   private truncateMode = false;
@@ -178,7 +170,8 @@ export class GridController {
     }
 
     if (p.kind === 'step' && y < 6) {
-      if (y === p.ch && x === p.col) {
+      const rawCol = p.col + (p.layer === 'B' ? PAGE_W : 0);
+      if (y === p.ch && x === rawCol) {
         this.removeStep(p.ch, p.col, p.layer);
         this.closePicker();
       } else {
@@ -231,15 +224,17 @@ export class GridController {
 
   private openStepPicker(ch: number, col: number): void {
     const param = this.selectedParam;
-    const layer = this.selectedLayer;
+    const layer: Layer = col < PAGE_W ? 'A' : 'B';
+    const stepIdx = col < PAGE_W ? col : col - PAGE_W;
     const cur = this.seqRef(ch, param, layer).values;
-    if (col === cur.length) {
+    if (stepIdx === cur.length) {
+      if (cur.length >= PAGE_W) return;  // layer is at capacity
       const next = cur.slice();
       next.push(defaultAppend(param, layer));
       this.commitStep(ch, param, next, layer);
-      this.picker = { kind: 'step', ch, col, layer };
-    } else if (col < cur.length) {
-      this.picker = { kind: 'step', ch, col, layer };
+      this.picker = { kind: 'step', ch, col: stepIdx, layer };
+    } else if (stepIdx < cur.length) {
+      this.picker = { kind: 'step', ch, col: stepIdx, layer };
     } else {
       return;
     }
@@ -321,15 +316,17 @@ export class GridController {
   // layer is currently being viewed.
   private truncateStep(ch: number, col: number): void {
     const param = this.selectedParam;
-    const layer = this.selectedLayer;
+    const layer: Layer = col < PAGE_W ? 'A' : 'B';
+    const stepIdx = col < PAGE_W ? col : col - PAGE_W;
     const next = this.seqRef(ch, param, layer).values.slice();
-    next.splice(col);
+    next.splice(stepIdx);
     this.commitStep(ch, param, next, layer);
   }
 
   // ---- mute --------------------------------------------------------------
 
   private toggleNoteMute(ch: number, col: number): void {
+    if (col >= PAGE_W) return;  // mute only applies to A layer (left half)
     const state = this.engine.channels[ch];
     const noteLen = state.note.length;
     if (col >= noteLen) return;   // nothing to mute at this column
@@ -352,14 +349,7 @@ export class GridController {
 
   private handleRow7(x: number): void {
     if (x < PARAMS.length) {
-      const p = PARAMS[x];
-      if (p === this.selectedParam) {
-        // second press of the already-selected param toggles A↔B view
-        this.selectedLayer = this.selectedLayer === 'A' ? 'B' : 'A';
-      } else {
-        this.selectedParam = p;
-        this.selectedLayer = 'A';
-      }
+      this.selectedParam = PARAMS[x];
       this.renderAll();
       this.updateStatus();
     } else if (x === SCALE_BUTTON_COL) {
@@ -368,14 +358,7 @@ export class GridController {
       this.handleQuantizeButton();
     } else if (x === MUTE_BUTTON_COL) {
       this.muteMode = !this.muteMode;
-      if (this.muteMode) {
-        this.truncateMode = false;
-        // mute is keyed off A's note positions — flip back to A so the view
-        // matches what the modifier actually targets.
-        this.selectedLayer = 'A';
-      }
-      // renderAll so muted cells in any visible channel row pick up the
-      // strobe state immediately.
+      if (this.muteMode) this.truncateMode = false;
       this.renderAll();
       this.updateStatus();
     } else if (x === TRUNCATE_BUTTON_COL) {
@@ -479,42 +462,44 @@ export class GridController {
 
   private renderChannelRow(ch: number): void {
     const param = this.selectedParam;
-    const layer = this.selectedLayer;
-    const seq = this.seqRef(ch, param, layer);
-    const vals = seq.values;
-    // Note-row mute indication: only applies when viewing A's note param —
-    // mute is keyed off A's positions and B has no parallel mask.
-    const mute = (param === 'note' && layer === 'A')
-      ? this.engine.channels[ch].noteMute
-      : null;
 
-    for (let x = 0; x < GRID_W; x++) {
-      if (x < vals.length) {
-        const isMuted = mute?.[x] === true;
-        // While in mute mode, muted cells get a higher base brightness so
-        // the strobe animation has something visible to pulse against.
-        const b = isMuted
-          ? (this.muteMode ? 6 : 2)
-          : valueBrightness(param, vals[x]);
-        this.grid.setLed(x, ch, b);
-        this.grid.setStrobe(x, ch, isMuted && this.muteMode);
-      } else if (x === vals.length) {
-        this.grid.setLed(x, ch, 1);
-        this.grid.setStrobe(x, ch, false);
-      } else {
-        this.grid.setLed(x, ch, 0);
-        this.grid.setStrobe(x, ch, false);
+    const renderHalf = (layer: Layer, colOffset: number) => {
+      const seq = this.seqRef(ch, param, layer);
+      const vals = seq.values;
+      const mute = (param === 'note' && layer === 'A')
+        ? this.engine.channels[ch].noteMute
+        : null;
+
+      for (let i = 0; i < PAGE_W; i++) {
+        const x = colOffset + i;
+        if (i < vals.length) {
+          const isMuted = mute?.[i] === true;
+          const b = isMuted
+            ? (this.muteMode ? 6 : 2)
+            : valueBrightness(param, vals[i]);
+          this.grid.setLed(x, ch, b);
+          this.grid.setStrobe(x, ch, isMuted && this.muteMode);
+        } else if (i === vals.length && vals.length < PAGE_W) {
+          this.grid.setLed(x, ch, 1);
+          this.grid.setStrobe(x, ch, false);
+        } else {
+          this.grid.setLed(x, ch, 0);
+          this.grid.setStrobe(x, ch, false);
+        }
       }
-    }
 
-    if (this.engine.isRunning(ch) && vals.length > 0) {
-      const playhead = (seq.index - 1 + vals.length) % vals.length;
-      this.grid.setLed(playhead, ch, 15);
-    }
+      if (this.engine.isRunning(ch) && vals.length > 0) {
+        const playhead = (seq.index - 1 + vals.length) % vals.length;
+        this.grid.setLed(colOffset + playhead, ch, 15);
+      }
 
-    if (this.picker?.kind === 'step' && this.picker.ch === ch) {
-      this.grid.setLed(this.picker.col, ch, 15);
-    }
+      if (this.picker?.kind === 'step' && this.picker.ch === ch && this.picker.layer === layer) {
+        this.grid.setLed(colOffset + this.picker.col, ch, 15);
+      }
+    };
+
+    renderHalf('A', 0);
+    renderHalf('B', PAGE_W);
   }
 
   private renderRow6(): void {
@@ -529,9 +514,7 @@ export class GridController {
     for (let x = 0; x < PARAMS.length; x++) {
       const isSelected = PARAMS[x] === this.selectedParam;
       this.grid.setLed(x, 7, isSelected ? 15 : 5);
-      // Strobe the active param button while viewing its B layer — same
-      // visual idiom as mute/truncate.
-      this.grid.setStrobe(x, 7, isSelected && this.selectedLayer === 'B');
+      this.grid.setStrobe(x, 7, false);
     }
     const scaleOpen = this.picker?.kind === 'scale';
     this.grid.setLed(SCALE_BUTTON_COL, 7, scaleOpen ? 15 : 8);
@@ -571,11 +554,8 @@ export class GridController {
     } else if (p?.kind === 'quantize') {
       this.statusEl.textContent =
         `pick quantize on rows 0-1 (1..32) — double-click button to disable, tap again to cancel`;
-    } else if (this.selectedLayer === 'B') {
-      this.statusEl.textContent =
-        `editing ${this.selectedParam} (layer B — added to A) — tap param button again to return to A`;
     } else {
-      this.statusEl.textContent = `editing ${this.selectedParam} — tap a step to change`;
+      this.statusEl.textContent = `editing ${this.selectedParam} — cols 0-7 = A layer · cols 8-15 = B layer`;
     }
   }
 }

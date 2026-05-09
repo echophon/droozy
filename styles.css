@@ -77,11 +77,16 @@ header input[type="number"] {
 main {
   padding: 1.5rem;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 1.5rem;
+}
+
+.top-row {
+  display: flex;
+  flex-direction: row;
+  gap: 1.5rem;
+  align-items: flex-start;
 }
 
 .grid-wrap {
@@ -215,9 +220,8 @@ main {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 460px;
+  width: 100%;
   max-width: 100%;
-  flex: 0 1 460px;
 }
 
 .repl-header {
@@ -316,6 +320,7 @@ main {
 }
 
 .repl-help {
+  flex: 1;
   font-size: 0.78rem;
   color: var(--dim);
   background: #0d0d10;
@@ -323,7 +328,6 @@ main {
   border-radius: 4px;
   padding: 0.6rem 0.8rem;
   line-height: 1.7;
-  margin-bottom: 0.4rem;
 }
 
 .repl-help h3 {
