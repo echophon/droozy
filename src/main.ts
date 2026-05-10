@@ -30,7 +30,8 @@ startBtn.addEventListener('click', async () => {
   });
 
   // master output with a touch of headroom; bursts can pile up fast
-  const out = new Tone.Gain(0.6).toDestination();
+  const limiter = new Tone.Limiter(-3).toDestination();
+  const out = new Tone.Gain(0.6).connect(limiter);
 
   const voices = Array.from(
     { length: 6 },
@@ -69,6 +70,12 @@ startBtn.addEventListener('click', async () => {
   // Call refresh() after direct state writes that don't go through launch()
   // (e.g. `engine.quantize = 16` or `engine.scale = scales.minor`).
   w.refresh = () => controller.refresh();
+  // geodeMode(n) — 0=off, 1=transient, 2=sustain, 3=cycle. Matches the col-11
+  // grid button. Call refresh() after to update the LED.
+  w.geodeMode = (mode: 0 | 1 | 2 | 3) => {
+    engine.geodeMode = mode;
+    controller.refresh();
+  };
 
   const repl = new Repl(
     document.getElementById('repl-editor')!,

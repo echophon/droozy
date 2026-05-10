@@ -72,6 +72,37 @@ function defaultChannel(): ChannelState {
   };
 }
 
+// Geode-style per-hit amplitude. `run` is the level param interpreted as a
+// bipolar RUN CV: 0.5 = neutral (0V), 0 = full negative, 1 = full positive.
+function geodeAmplitude(mode: 1 | 2 | 3, run: number, i: number, total: number): number {
+  const r = (run - 0.5) * 2;  // -1..+1
+
+  if (mode === 1) {  // Transient: sawtooth accent cycle
+    if (Math.abs(r) < 0.01) return 1.0;
+    const cycleLen = Math.max(1, Math.round(1 + Math.abs(r) * 9));
+    const pos = i % cycleLen;
+    return r > 0
+      ? 1.0 - pos / cycleLen    // sawtooth down from accent
+      : (pos + 1) / cycleLen;   // reversed: rises to accent
+  }
+
+  if (mode === 2) {  // Sustain: decay with triangle fold/reflect
+    const period = total === Infinity ? 8 : Math.max(2, total);
+    const idx = total === Infinity ? i % period : i;
+    const t = idx / (period - 1);
+    const rate = r >= 0 ? 1 + r * 4 : Math.max(0.05, 1 + r);  // 0.05..5
+    const raw = t * rate;
+    return Math.abs(((raw % 2) + 2) % 2 - 1);  // triangle: 1→0→1→0...
+  }
+
+  // mode === 3: Cycle — sinusoidal, continuous period
+  if (Math.abs(r) < 0.01) return 1.0;
+  const freq = r > 0
+    ? 1 / (2 + r * 8)       // period 2..10 hits as r → 0..1
+    : 1 + Math.abs(r) * 9;  // 1..10 cycles/hit (sub-beat, quasi-random)
+  return 0.5 + 0.5 * Math.cos(2 * Math.PI * i * freq);
+}
+
 export class BurstEngine {
   readonly channels: ChannelState[];
   // Per-fire snap grid (events per whole note). Each event's target time is
@@ -79,6 +110,21 @@ export class BurstEngine {
   // happen at their ideal 4/div positions; useful for free-running rhythms).
   // Default 16 = 16th-note correction.
   quantize = 16;
+  // Envelope timing mode:
+  //   0 = shape  — env 0..1 maps to fixed time ranges (existing behaviour)
+  //   1 = burst  — amp decay = total burst duration (reps × hit interval)
+  //   2 = hit    — amp decay = interval between hits (4/div beats)
+  // Modes 1 and 2 make the envelope musically in-sync with the pattern.
+  // In mode 1 with infinite reps, falls back to hit-interval (same as mode 2).
+  envMode: 0 | 1 | 2 = 0;
+  // Geode amplitude mode (from Just-Friends Geode spec). Controls how per-hit
+  // amplitude varies within a burst, using `level` as the "RUN voltage" input
+  // (0.5 = neutral/0V, 0 = full negative, 1 = full positive):
+  //   0 = off       — level is direct amplitude (unchanged)
+  //   1 = transient — sawtooth accent cycle; n-hit period set by level
+  //   2 = sustain   — amplitude decays (and folds) across the burst
+  //   3 = cycle     — sinusoidal cycling with continuous period
+  geodeMode: 0 | 1 | 2 | 3 = 0;
   // Launch alignment grid. The global-clock equivalent of "wait for the next
   // pulse." A user click is unreliable as a clock source, so launches snap
   // forward to the next launchGrid beat boundary. This makes simultaneous
@@ -245,7 +291,7 @@ export class BurstEngine {
           // voice trigger — the note is silent at this position.
           this.emit({ type: 'fire', ch, beat: target, freq, level });
         } else {
-          this.fire(ch, target, freq, level, harm, env);
+          this.fire(ch, target, freq, level, harm, env, div, total, i);
         }
         target += 4 / div;
       }
@@ -256,8 +302,19 @@ export class BurstEngine {
     return null;
   }
 
-  private fire(ch: number, beat: number, freq: number, level: number, harm: number, env: number): void {
-    this.voices[ch].triggerAt(Tone.now(), freq, level, harm, env);
-    this.emit({ type: 'fire', ch, beat, freq, level });
+  private fire(ch: number, beat: number, freq: number, level: number, harm: number, env: number, div: number, total: number, hitIdx: number): void {
+    const actualLevel = this.geodeMode !== 0
+      ? geodeAmplitude(this.geodeMode as 1 | 2 | 3, level, hitIdx, total)
+      : level;
+    let decaySec: number | undefined;
+    if (this.envMode !== 0) {
+      const secPerBeat = 60 / Tone.Transport.bpm.value;
+      const intervalSec = (4 / div) * secPerBeat;
+      decaySec = this.envMode === 1 && total !== Infinity
+        ? total * intervalSec
+        : intervalSec;
+    }
+    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec);
+    this.emit({ type: 'fire', ch, beat, freq, level: actualLevel });
   }
 }

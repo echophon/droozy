@@ -11,6 +11,7 @@ dist-ssr/
 
 # TypeScript
 *.tsbuildinfo
+src/**/*.js
 
 # Test coverage
 coverage/

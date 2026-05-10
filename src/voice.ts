@@ -82,7 +82,7 @@ export class FMVoice {
    * Also TODO: pick a voice from the pool here, instead of retriggering the
    * single shared carrier/modulator. As written, fast bursts will choke.
    */
-  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number): void {
+  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number): void {
     const lv = Math.max(0, Math.min(1, level));
     // Per-trigger harmonicity overrides the voice default; the burst engine
     // sequences this per-step so each note can have its own timbral character.
@@ -91,10 +91,16 @@ export class FMVoice {
     // env (0..1) shapes the envelope from snappy → longer-but-still-percussive.
     // 0 reproduces the voice's static defaults exactly (matching legacy calls
     // that pass no env). 1 caps at "long perc" — never a sustained pad.
+    // decaySec bypasses the 0..1 range entirely and sets ampDec directly in
+    // wall-clock seconds (burst-timed and hit-timed env modes).
     let attackTime: number;
     let ampDec: number;
     let modDec: number;
-    if (env !== undefined) {
+    if (decaySec !== undefined) {
+      attackTime = 0.001;
+      ampDec = Math.max(0.01, decaySec);
+      modDec = ampDec * 0.4;
+    } else if (env !== undefined) {
       const e = Math.max(0, Math.min(1, env));
       attackTime = 0.001 + e * 0.024;     // 1ms → 25ms
       ampDec = 0.4 + e * 0.8;              // 0.4s → 1.2s
