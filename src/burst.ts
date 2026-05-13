@@ -29,11 +29,18 @@ export interface ChannelState {
   levelB: Sequins<number>;
   harmB: Sequins<number>;
   envB: Sequins<number>;
-  // Per-note-position mute mask. true = silent (skip voice trigger but keep
-  // the playhead and timing advancing). Parallel to `note.values`; missing
-  // entries are treated as unmuted. Mute is keyed off A's note positions
-  // only — B has no parallel mute mask.
-  noteMute: boolean[];
+  // Probability that a burst/hit fires (0..1, default 1).
+  // probHit=false: checked once per burst (infinite bursts unaffected).
+  // probHit=true:  checked independently for each hit within a burst.
+  burstProb: number;
+  probHit: boolean;
+  // Envelope timing mode: 0=shape 1=burst 2=hit
+  envMode: 0 | 1 | 2;
+  // Geode amplitude mode: 0=off 1=transient 2=sustain 3=cycle
+  geodeMode: 0 | 1 | 2 | 3;
+  // When true, all A-layer parameters are kept at the same sequence length.
+  // Extends or truncates sibling params whenever one param's length changes.
+  locked: boolean;
 }
 
 type LaunchVal = number | Sequins<number> | SumLayers<number>;
@@ -48,7 +55,7 @@ export interface LaunchOpts {
 }
 
 export type BurstEvent =
-  | { type: 'fire'; ch: number; beat: number; freq: number; level: number }
+  | { type: 'fire'; ch: number; beat: number; freq: number; level: number; harm: number; env: number }
   | { type: 'launch'; ch: number }
   | { type: 'stop'; ch: number };
 
@@ -68,9 +75,16 @@ function defaultChannel(): ChannelState {
     levelB: sequins([0]),
     harmB:  sequins([0]),
     envB:   sequins([0]),
-    noteMute: [],
+    burstProb: 1,
+    probHit: false,
+    envMode: 0,
+    geodeMode: 0,
+    locked: true,
   };
 }
+
+// Rhythmically meaningful divisors for randomize/mutate operations.
+const MUSICAL_DIVS = [2, 3, 4, 6, 8, 12, 16] as const;
 
 // Geode-style per-hit amplitude. `run` is the level param interpreted as a
 // bipolar RUN CV: 0.5 = neutral (0V), 0 = full negative, 1 = full positive.
@@ -105,26 +119,6 @@ function geodeAmplitude(mode: 1 | 2 | 3, run: number, i: number, total: number):
 
 export class BurstEngine {
   readonly channels: ChannelState[];
-  // Per-fire snap grid (events per whole note). Each event's target time is
-  // snapped to this grid before firing. 0 disables per-fire snapping (events
-  // happen at their ideal 4/div positions; useful for free-running rhythms).
-  // Default 16 = 16th-note correction.
-  quantize = 16;
-  // Envelope timing mode:
-  //   0 = shape  — env 0..1 maps to fixed time ranges (existing behaviour)
-  //   1 = burst  — amp decay = total burst duration (reps × hit interval)
-  //   2 = hit    — amp decay = interval between hits (4/div beats)
-  // Modes 1 and 2 make the envelope musically in-sync with the pattern.
-  // In mode 1 with infinite reps, falls back to hit-interval (same as mode 2).
-  envMode: 0 | 1 | 2 = 0;
-  // Geode amplitude mode (from Just-Friends Geode spec). Controls how per-hit
-  // amplitude varies within a burst, using `level` as the "RUN voltage" input
-  // (0.5 = neutral/0V, 0 = full negative, 1 = full positive):
-  //   0 = off       — level is direct amplitude (unchanged)
-  //   1 = transient — sawtooth accent cycle; n-hit period set by level
-  //   2 = sustain   — amplitude decays (and folds) across the burst
-  //   3 = cycle     — sinusoidal cycling with continuous period
-  geodeMode: 0 | 1 | 2 | 3 = 0;
   // Launch alignment grid. The global-clock equivalent of "wait for the next
   // pulse." A user click is unreliable as a clock source, so launches snap
   // forward to the next launchGrid beat boundary. This makes simultaneous
@@ -132,6 +126,8 @@ export class BurstEngine {
   // exact moment the user pressed the buttons. 0 disables launch alignment
   // entirely. Default 4 = next quarter note.
   launchGrid = 4;
+  // Global snap grid (events per whole note). 0 disables snapping.
+  quantize = 16;
   // Global scale shared across all channels. Direct mutation is fine; call
   // controller.refresh() (or the REPL's `refresh()`) to update the grid.
   scale: readonly number[] = scales.major;
@@ -156,6 +152,21 @@ export class BurstEngine {
 
   isRunning(ch: number): boolean {
     return this.running[ch] ?? false;
+  }
+
+  runningChannels(): boolean[] {
+    return this.running.slice();
+  }
+
+  resetSequins(): void {
+    for (const ch of this.channels) {
+      ch.div.reset();   ch.divB.reset();
+      ch.reps.reset();  ch.repsB.reset();
+      ch.note.reset();  ch.noteB.reset();
+      ch.level.reset(); ch.levelB.reset();
+      ch.harm.reset();  ch.harmB.reset();
+      ch.env.reset();   ch.envB.reset();
+    }
   }
 
   // Lua launch(): patch the channel state, cancel any in-flight coroutine
@@ -187,7 +198,7 @@ export class BurstEngine {
 
     apply('div',   opts.div);
     apply('reps',  opts.reps);
-    if (apply('note', opts.note)) cfg.noteMute = []; // fresh note → fully unmuted
+    apply('note', opts.note);
     apply('level', opts.level);
     apply('harm',  opts.harm);
     apply('env',   opts.env);
@@ -210,6 +221,49 @@ export class BurstEngine {
 
   stopAll(): void {
     for (let i = 1; i <= NUM_CHANNELS; i++) this.stop(i);
+  }
+
+  // Replace all A-layer sequins with musically-constrained random values.
+  // B-layers and burstProb are left untouched. Safe to call on a running
+  // channel — the identity check in runBurst() will pick up the new refs.
+  randomize(ch1: number): void {
+    const ch = ch1 - 1;
+    if (ch < 0 || ch >= NUM_CHANNELS) return;
+    const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const len = pick([2, 3, 4] as const);
+    const c = this.channels[ch];
+    c.div   = sequins(Array.from({ length: len }, () => pick(MUSICAL_DIVS)));
+    c.reps  = sequins(Array.from({ length: len }, () => pick([1, 2, 2, 3, 4] as const)));
+    c.note  = sequins(Array.from({ length: len }, () => Math.floor(Math.random() * 8)));
+    const tLen = c.locked ? len : 1;
+    c.level = sequins(Array.from({ length: tLen }, () => 0.4 + Math.random() * 0.5));
+    c.harm  = sequins(Array.from({ length: tLen }, () => 2 + Math.random() * 0.8));
+    c.env   = sequins(Array.from({ length: tLen }, () => Math.random() * 0.6));
+  }
+
+  // Perturb A-layer sequin values by ±amount (0..1), preserving sequence
+  // length and clamping to each param's valid range.
+  mutate(ch1: number, amount = 0.25): void {
+    const ch = ch1 - 1;
+    if (ch < 0 || ch >= NUM_CHANNELS) return;
+    const c = this.channels[ch];
+    const jitter = (scale: number) => (Math.random() * 2 - 1) * scale;
+
+    const nearestMusicalDiv = (v: number): number =>
+      MUSICAL_DIVS.reduce((best, d) => Math.abs(d - v) < Math.abs(best - v) ? d : best);
+
+    c.div  = sequins(c.div.values.map(v =>
+      nearestMusicalDiv(v * (1 + jitter(amount)))));
+    c.reps = sequins(c.reps.values.map(v =>
+      v === -1 ? -1 : Math.max(1, Math.min(8, Math.round(v + jitter(amount * 4))))));
+    c.note = sequins(c.note.values.map(v =>
+      Math.round(v + jitter(amount * 4))));
+    c.level = sequins(c.level.values.map(v =>
+      Math.max(0, Math.min(1, v + jitter(amount * 0.5)))));
+    c.harm = sequins(c.harm.values.map(v =>
+      Math.max(2, Math.min(4, v + jitter(amount * 2)))));
+    c.env  = sequins(c.env.values.map(v =>
+      Math.max(0, Math.min(1, v + jitter(amount * 0.6)))));
   }
 
   private emit(ev: BurstEvent): void {
@@ -263,17 +317,21 @@ export class BurstEngine {
       const repsA = repsSeq.next();
       const repsBval = repsSeqB.next();
       const reps = repsA === -1 ? -1 : repsA + repsBval;
-      // Capture the note position BEFORE next() advances the cursor; this is
-      // the index whose mute state gates this burst. Mute keys off A only —
-      // B has no parallel mask.
-      const noteIdx = (noteSeq.index) % Math.max(noteSeq.length, 1);
       const degree = noteSeq.next() + noteSeqB.next();
       const level = cfg.level.next() + cfg.levelB.next();
       const harm = cfg.harm.next() + cfg.harmB.next();
       const env = cfg.env.next() + cfg.envB.next();
       const freq = degreeToFreq(degree, this.scale);
-      const muted = cfg.noteMute[noteIdx] === true;
       const total = reps === -1 ? Infinity : reps;
+
+      // Burst-mode probability gate — skip the whole burst. Only applies when
+      // not in per-hit mode; infinite bursts are unaffected either way.
+      if (!cfg.probHit && reps !== -1 && Math.random() > cfg.burstProb) {
+        target += reps * (4 / div);
+        await waitUntilBeat(target, this.quantize);
+        if (this.tokens[ch] !== token) return null;
+        return { reps, div, target };
+      }
 
       let restarted = false;
       for (let i = 0; i < total && this.tokens[ch] === token; i++) {
@@ -286,10 +344,9 @@ export class BurstEngine {
         }
         await waitUntilBeat(target, this.quantize);
         if (this.tokens[ch] !== token) return null;
-        if (muted) {
-          // Emit a fire event so the playhead still advances, but skip the
-          // voice trigger — the note is silent at this position.
-          this.emit({ type: 'fire', ch, beat: target, freq, level });
+        if (cfg.probHit && Math.random() > cfg.burstProb) {
+          // Advance playhead but skip voice — keeps timing grid-locked.
+          this.emit({ type: 'fire', ch, beat: target, freq, level, harm, env });
         } else {
           this.fire(ch, target, freq, level, harm, env, div, total, i);
         }
@@ -303,18 +360,21 @@ export class BurstEngine {
   }
 
   private fire(ch: number, beat: number, freq: number, level: number, harm: number, env: number, div: number, total: number, hitIdx: number): void {
-    const actualLevel = this.geodeMode !== 0
-      ? geodeAmplitude(this.geodeMode as 1 | 2 | 3, level, hitIdx, total)
+    const { envMode, geodeMode } = this.channels[ch];
+    const raw = geodeMode !== 0
+      ? geodeAmplitude(geodeMode as 1 | 2 | 3, level, hitIdx, total)
       : level;
+    // Geode and env modes cause energy buildup (accent peaks, long overlap).
+    const actualLevel = (geodeMode !== 0 || env > 0) ? Math.min(0.7, raw) : raw;
     let decaySec: number | undefined;
-    if (this.envMode !== 0) {
+    if (envMode !== 0) {
       const secPerBeat = 60 / Tone.Transport.bpm.value;
       const intervalSec = (4 / div) * secPerBeat;
-      decaySec = this.envMode === 1 && total !== Infinity
+      decaySec = envMode === 1 && total !== Infinity
         ? total * intervalSec
         : intervalSec;
     }
     this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec);
-    this.emit({ type: 'fire', ch, beat, freq, level: actualLevel });
+    this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
   }
 }

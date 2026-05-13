@@ -65,13 +65,15 @@ export class Grid {
     this.cells[idx].style.setProperty('--led', String(lvl));
   }
 
-  /** Toggle a CSS-driven strobe animation on a single cell. The animation
-   *  is defined in styles.css (.cell.strobe). Combine with setLed to choose
-   *  the *base* brightness; the animation pulses on top of that. */
-  setStrobe(x: number, y: number, on: boolean): void {
+  /** Set a CSS-driven strobe animation on a single cell.
+   *  'slow' (~0.6 Hz) = persistent state (B layer, prob-hit toggle).
+   *  'fast' (~1.4 Hz) = active mode (truncate, prob, randomize, mutate, KB).
+   *  'off'            = no animation. */
+  setStrobe(x: number, y: number, speed: 'off' | 'slow' | 'fast'): void {
     if (x < 0 || x >= GRID_W || y < 0 || y >= GRID_H) return;
-    const idx = y * GRID_W + x;
-    this.cells[idx].classList.toggle('strobe', on);
+    const cell = this.cells[y * GRID_W + x];
+    cell.classList.toggle('strobe-slow', speed === 'slow');
+    cell.classList.toggle('strobe-fast', speed === 'fast');
   }
 
   setRow(y: number, levels: ArrayLike<number>): void {
@@ -85,9 +87,9 @@ export class Grid {
         this.brightness[i] = 0;
         this.cells[i].style.setProperty('--led', '0');
       }
-      // Strobe class outlives brightness — strip it on clear so a re-render
-      // can decide whether to re-add it for any cell.
-      this.cells[i].classList.remove('strobe');
+      // Strobe classes outlive brightness — strip both on clear so a re-render
+      // can decide whether to re-add them for any cell.
+      this.cells[i].classList.remove('strobe-slow', 'strobe-fast');
     }
   }
 

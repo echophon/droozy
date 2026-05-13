@@ -181,10 +181,16 @@ main {
   filter: brightness(1.4);
 }
 
-/* Mute strobe — pulses muted cells (and the mute-mode button itself) while
-   the controller is in mute mode. ~1.4 Hz (350ms half-cycle, alternating)
-   stays well below seizure-trigger thresholds. */
-.grid button.cell.strobe {
+/* Slow strobe (~0.6 Hz, 800ms half-cycle) — persistent state: B layer active,
+   prob-hit toggle. Signals "something is latched differently than normal." */
+.grid button.cell.strobe-slow {
+  animation: led-strobe 800ms ease-in-out infinite alternate;
+}
+
+/* Fast strobe (~1.4 Hz, 350ms half-cycle) — active mode: truncate, prob,
+   randomize, mutate, KB mode. Signals "you are in a temporary mode."
+   Both speeds stay well below seizure-trigger thresholds. */
+.grid button.cell.strobe-fast {
   animation: led-strobe 350ms ease-in-out infinite alternate;
 }
 

@@ -4,57 +4,60 @@ import { Sequins, sequins } from './sequins';
 import { scales, ScaleName } from './scales';
 
 // Layout reference:
-//   rows 0..5 = per-channel step view: cols 0..15 = active layer (A or B, up to 16 steps)
-//   row 6     = 0..5 launch | 6..11 unused | 12..15 scenes (stub)
-//   row 7     = 0..5 param (div/reps/note/level/harm/env)
-//             |  press once = select & show A layer
-//             |  press again (same param) = toggle to B layer (button strobes)
-//             | 6 scale | 7 quantize | 8 MUTE mode | 9 TRUNCATE mode
-//             | 10 ENV MODE (dim=shape · mid=burst · bright=hit)
-//             | 11 GEODE MODE (off · dim=transient · mid=sustain · bright=cycle)
-//             | 12 KB MODE (keyboard mode entry/exit) | 13..15 unused
+//   rows 0..5 = per-channel step view: cols 0..7 = A layer · cols 8..15 = B layer
+//   row 6     = 0..5 launch · 6..11 dark · 12 KB · 13 PROB · 14 QNT · 15 SND
+//   row 7     = 0..5 param (div/reps/note/level/harm/env) · 6 scale · 7-8 dark
+//             · 9 CLR · 10-13 dark · 14 RANDOMIZE · 15 MUTATE
 //
-// KEYBOARD MODE (row 7 col 12) — gestural sequence programming
+// Display modes (row 6 right side — latch, mutually exclusive):
+//   PROB (col 13): rows 0-5 each show a probability slider for that channel
+//     cols 0..14 = burst probability 0-100% · col 15 = burst/hit toggle
+//   QNT (col 14): rows 0-5 each show a quantize slider (3..18, one value per col)
+//   SND (col 15): rows 0-5 each show env (cols 0-2) and geode (cols 4-7) per channel
+//
+// Row 7 action modes (momentary — arm, then tap a channel in row 6):
+//   CLR (col 9):        clear selected param (A+B) for a channel → tap row 6 to pick
+//   LOCK (col 10):      toggle locked mode per channel (persistent — stays armed for multi-channel)
+//   RANDOMIZE (col 14): replace A-layer with fresh random values
+//   MUTATE (col 15):    nudge existing A-layer values
+//
+// KEYBOARD MODE (row 6 col 12) — gestural sequence programming
 //   Page 1: rows 0..1 = note · rows 2..3 = div · rows 4..5 = reps (32 values each)
 //   Page 2: rows 0..1 = level · rows 2..3 = harm · rows 4..5 = env (32 values each)
 //   Row 6:  cols 0..7 = scale select · cols 8..15 = dark
-//   Row 7:  cols 0..5 = channel select (tap again = toggle A/B layer; button strobes on B)
-//            col 12 = KB toggle/commit · col 13 = page toggle · col 14 = clear buffers
+//   Row 7:  cols 0..5 = channel select (tap again = toggle A/B · slow-strobes on B)
+//           col 12 = commit/exit (fast-strobes) · col 13 = page toggle · col 14 = clear buffers
 //
-// PICKERS (rows 0..1, momentary)
-//   step picker   — tap a step on rows 0..5 (with mute mode OFF)
-//   scale picker  — tap row 7 col 6
-//   quantize picker — tap row 7 col 7 (double-click disables instead of opening)
+// PICKERS (rows 0..1, momentary):
+//   step picker  — tap a step on rows 0..5
+//   scale picker — tap row 7 col 6
 //
-// MUTE MODIFIER (row 7 col 8)
-//   Tap to latch into mute mode. While latched, taps toggle the noteMute flag
-//   at that step — only active when the A layer is selected (mute has no B-layer
-//   equivalent). Tap again to exit.
 
 type ParamName = 'div' | 'reps' | 'note' | 'level' | 'harm' | 'env';
 const PARAMS: ParamName[] = ['div', 'reps', 'note', 'level', 'harm', 'env'];
 
-const SCALE_BUTTON_COL = 6;
-const QUANTIZE_BUTTON_COL = 7;
-const MUTE_BUTTON_COL = 8;
-const TRUNCATE_BUTTON_COL = 9;
-const ENV_MODE_BUTTON_COL = 10;
-const ENV_MODE_BRIGHTNESS: readonly number[] = [3, 8, 14];  // shape / burst / hit
-const ENV_MODE_NAMES: readonly string[] = ['shape', 'burst', 'hit'];
-const GEODE_MODE_BUTTON_COL = 11;
-const GEODE_MODE_BRIGHTNESS: readonly number[] = [0, 4, 9, 14]; // off / transient / sustain / cycle
-const GEODE_MODE_NAMES: readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
+// Row 7 buttons
+const SCALE_BUTTON_COL     = 6;
+const CLR_BUTTON_COL       = 9;   // clear selected param on a channel
+const LOCK_BUTTON_COL      = 10;  // toggle locked (equal-length) mode per channel
+const RANDOMIZE_BUTTON_COL = 14;
+const MUTATE_BUTTON_COL    = 15;
 
-const KB_MODE_BUTTON_COL   = 12;
-const KB_PAGE_BUTTON_COL   = 13;
-const KB_CLEAR_BUTTON_COL  = 14;
+// Row 6 right side — mode access (cols 12-15, freed from scenes stub)
+const ROW6_KB_COL   = 12;
+const ROW6_PROB_COL = 13;
+const ROW6_QNT_COL  = 14;
+const ROW6_SND_COL  = 15;
+
+// Within KB mode, row 7 controls (col numbers, not row 6)
+const KB_EXIT_COL  = 12;
+const KB_PAGE_BUTTON_COL  = 13;
+const KB_CLEAR_BUTTON_COL = 14;
 
 // 8 scales shown in KB modifier row (row 6, cols 0..7).
 const KB_SCALE_NAMES: readonly ScaleName[] = [
   'chromatic', 'major', 'minor', 'pentatonic', 'dorian', 'akebono', 'hijaz', 'kurd',
 ];
-
-const DOUBLE_CLICK_MS = 350;
 
 // Scale picker layout. Two rows split the catalogue by region.
 const SCALE_PICKER_ROWS: readonly ScaleName[][] = [
@@ -62,8 +65,11 @@ const SCALE_PICKER_ROWS: readonly ScaleName[][] = [
   ['akebono', 'hijaz', 'kurd', 'bayati', 'rast', 'zen', 'wuSheng'],
 ];
 
-// Every integer 1..32 — odd values reachable for tuplet feels.
-const QUANTIZE_PICKER: readonly number[] = Array.from({ length: 32 }, (_, i) => i + 1);
+// Per-channel quantize slider: cols 0-12 → 4..16, cols 13-15 → 32, 64, 128.
+const QUANTIZE_VALUES: readonly number[] = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64, 128];
+
+const ENV_MODE_NAMES:   readonly string[] = ['shape', 'burst', 'hit'];
+const GEODE_MODE_NAMES: readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
 
 // Default value used when a tap appends a new step.
 const DEFAULT_VALUE: Record<ParamName, number> = {
@@ -124,17 +130,17 @@ const eq = (a: number, b: number) => Math.abs(a - b) < 1e-6;
 
 type Picker =
   | { kind: 'step'; ch: number; col: number; layer: Layer }
-  | { kind: 'scale' }
-  | { kind: 'quantize' };
+  | { kind: 'scale' };
 
 export class GridController {
   private engine: BurstEngine;
   private grid: Grid;
   private selectedParam: ParamName = 'note';
   private picker: Picker | null = null;
-  private muteMode = false;
-  private truncateMode = false;
-  private quantizeClickTime = 0;
+  private probMode     = false;
+  private quantizeMode = false;
+  private soundMode    = false;
+  private actionMode: 'randomize' | 'mutate' | 'clear' | 'lock' | null = null;
   private statusEl: HTMLElement | null;
 
   private paramLayer: Layer = 'A';
@@ -186,12 +192,35 @@ export class GridController {
 
   private handleNormalPress(x: number, y: number): void {
     if (y < 6) {
-      if (this.truncateMode) {
-        this.truncateStep(y, x);
+      if (this.probMode) {
+        const ch = this.engine.channels[y];
+        if (x === 15) {
+          ch.probHit = !ch.probHit;
+          console.log(`[ch${y + 1} prob] ${ch.probHit ? 'per-hit' : 'burst'}`);
+        } else {
+          ch.burstProb = x / 14;
+          console.log(`[ch${y + 1} prob] ${(x / 14).toFixed(2)}`);
+        }
+        this.renderChannelRow(y);
         return;
       }
-      if (this.muteMode) {
-        this.toggleNoteMute(y, x);
+      if (this.quantizeMode) {
+        const v = QUANTIZE_VALUES[x];
+        this.engine.quantize = v;
+        console.log(`[quantize] ${v}`);
+        for (let ch = 0; ch < NUM_CHANNELS; ch++) this.renderChannelRow(ch);
+        return;
+      }
+      if (this.soundMode) {
+        const ch = this.engine.channels[y];
+        if (x <= 2) {
+          ch.envMode = x as 0 | 1 | 2;
+          console.log(`[ch${y + 1} env] ${ENV_MODE_NAMES[x]}`);
+        } else if (x >= 4 && x <= 7) {
+          ch.geodeMode = (x - 4) as 0 | 1 | 2 | 3;
+          console.log(`[ch${y + 1} geode] ${GEODE_MODE_NAMES[x - 4]}`);
+        }
+        this.renderChannelRow(y);
         return;
       }
       this.openStepPicker(y, x);
@@ -216,24 +245,13 @@ export class GridController {
         this.removeStep(p.ch, p.col, p.layer);
         this.closePicker();
       } else {
-        // mute mode while a step picker is open: switch to mute; otherwise re-focus
-        if (this.muteMode) {
-          this.closePicker();
-          this.toggleNoteMute(y, x);
-        } else {
-          this.openStepPicker(y, x);
-        }
+        this.openStepPicker(y, x);
       }
       return;
     }
 
     if (y === 7 && p.kind === 'scale' && x === SCALE_BUTTON_COL) {
       this.closePicker();
-      return;
-    }
-    if (y === 7 && p.kind === 'quantize' && x === QUANTIZE_BUTTON_COL) {
-      // Double-click on quantize button while picker is open = disable.
-      this.handleQuantizeButton();
       return;
     }
 
@@ -252,11 +270,6 @@ export class GridController {
       if (!name) return;
       this.engine.scale = scales[name];
       console.log(`[scale] ${name}`);
-    } else if (p.kind === 'quantize') {
-      const v = QUANTIZE_PICKER[y * GRID_W + x];
-      if (v === undefined) return;
-      this.engine.quantize = v;
-      console.log(`[quantize] ${v}`);
     }
     this.closePicker();
   }
@@ -289,12 +302,6 @@ export class GridController {
     this.updateStatus();
   }
 
-  private openQuantizePicker(): void {
-    this.picker = { kind: 'quantize' };
-    this.renderAll();
-    this.updateStatus();
-  }
-
   private closePicker(): void {
     this.picker = null;
     this.renderAll();
@@ -323,68 +330,112 @@ export class GridController {
     const param = this.selectedParam;
     const next = this.seqRef(ch, param, layer).values.slice();
     next.splice(col, 1);
-    // noteMute is parallel to A.note only — no B-side mute mask.
-    if (layer === 'A' && param === 'note') {
-      const m = this.engine.channels[ch].noteMute;
-      if (col < m.length) m.splice(col, 1);
-    }
     this.commitStep(ch, param, next, layer);
   }
 
-  private commitStep(ch: number, param: ParamName, vals: number[], layer: Layer): void {
+  private commitStepRaw(ch: number, param: ParamName, vals: number[], layer: Layer): void {
     const final = vals.length === 0 ? [defaultAppend(param, layer)] : vals;
     const c = this.engine.channels[ch];
     if (layer === 'A') {
       c[param] = sequins(final);
-      if (param === 'note') {
-        // Realign noteMute to A.note's new length.
-        const m = c.noteMute;
-        while (m.length < final.length) m.push(false);
-        if (m.length > final.length) m.length = final.length;
-      }
     } else {
       const key = (param + 'B') as keyof ChannelState;
       (c as unknown as Record<string, Sequins<number>>)[key] = sequins(final);
     }
-    console.log(`[ch${ch + 1} ${param}${layer === 'B' ? 'B' : ''}] s(${JSON.stringify(final)})`);
+    const logVals = param === 'env' ? final.map(v => Math.round(v * 31)) : final;
+    console.log(`[ch${ch + 1} ${param}${layer === 'B' ? 'B' : ''}] s(${JSON.stringify(logVals)})`);
   }
 
-  // ---- truncate ----------------------------------------------------------
+  private commitStep(ch: number, param: ParamName, vals: number[], layer: Layer): void {
+    const oldLen = this.seqRef(ch, param, layer).values.length;
+    this.commitStepRaw(ch, param, vals, layer);
+    const newLen = Math.max(1, vals.length);
+    if (this.engine.channels[ch].locked && layer === 'A' && newLen !== oldLen) {
+      this.syncLockedParams(ch, newLen, param);
+    }
+  }
 
-  // Trim the selected param's sequence on `ch` so that pressing column `col`
-  // determines the new length. Routes through commitStep() so noteMute and
-  // empty-sequence protection are handled automatically. Truncates whichever
-  // layer is currently being viewed.
-  private truncateStep(ch: number, col: number): void {
+  private syncLockedParams(ch: number, targetLen: number, skipParam: ParamName | null): void {
+    for (const param of PARAMS) {
+      if (param === skipParam) continue;
+      const cur = this.seqRef(ch, param, 'A').values;
+      if (cur.length === targetLen) continue;
+      const next = targetLen > cur.length
+        ? [...cur, ...Array(targetLen - cur.length).fill(cur[cur.length - 1])]
+        : cur.slice(0, targetLen);
+      this.commitStepRaw(ch, param, next, 'A');
+    }
+  }
+
+  private enforceLockOnEntry(ch: number): void {
+    const maxLen = Math.max(...PARAMS.map(p => this.seqRef(ch, p, 'A').values.length));
+    this.syncLockedParams(ch, maxLen, null);
+  }
+
+  // ---- clear -------------------------------------------------------------
+
+  // Reset the selected param's A and B sequences on `ch` to single-value
+  // defaults (effectively clearing whatever pattern was there).
+  private clearChannelParam(ch: number): void {
     const param = this.selectedParam;
-    const layer = this.paramLayer;
-    const next = this.seqRef(ch, param, layer).values.slice();
-    next.splice(col);
-    this.commitStep(ch, param, next, layer);
-  }
-
-  // ---- mute --------------------------------------------------------------
-
-  private toggleNoteMute(ch: number, col: number): void {
-    if (this.paramLayer !== 'A') return;  // mute only applies to A layer
-    const state = this.engine.channels[ch];
-    const noteLen = state.note.length;
-    if (col >= noteLen) return;   // nothing to mute at this column
-    while (state.noteMute.length < noteLen) state.noteMute.push(false);
-    state.noteMute[col] = !state.noteMute[col];
-    console.log(`[ch${ch + 1} mute] note[${col}] = ${state.noteMute[col]}`);
-    this.renderChannelRow(ch);
+    const c = this.engine.channels[ch];
+    c[param] = sequins([DEFAULT_VALUE[param]]);
+    const bKey = `${param}B` as keyof ChannelState;
+    (c as unknown as Record<string, Sequins<number>>)[bKey] = sequins([0]);
+    console.log(`[clear] ch${ch + 1} ${param}`);
+    this.renderAll();
   }
 
   // ---- row 6 / row 7 -----------------------------------------------------
 
   private handleRow6(x: number): void {
+    // Mode access buttons (right side, always available)
+    if (x === ROW6_KB_COL)   { this.enterKbMode(); return; }
+    if (x === ROW6_PROB_COL) {
+      this.probMode = !this.probMode;
+      if (this.probMode) { this.quantizeMode = false; this.soundMode = false; this.actionMode = null; }
+      this.renderAll(); this.updateStatus(); return;
+    }
+    if (x === ROW6_QNT_COL) {
+      this.quantizeMode = !this.quantizeMode;
+      if (this.quantizeMode) { this.probMode = false; this.soundMode = false; this.actionMode = null; }
+      this.renderAll(); this.updateStatus(); return;
+    }
+    if (x === ROW6_SND_COL) {
+      this.soundMode = !this.soundMode;
+      if (this.soundMode) { this.probMode = false; this.quantizeMode = false; this.actionMode = null; }
+      this.renderAll(); this.updateStatus(); return;
+    }
+
+    if (this.actionMode === 'lock' && x < 6) {
+      const c = this.engine.channels[x];
+      c.locked = !c.locked;
+      if (c.locked) this.enforceLockOnEntry(x);
+      console.log(`[lock] ch${x + 1} ${c.locked ? 'on' : 'off'}`);
+      this.renderAll(); this.updateStatus(); return;
+    }
+
+    if (this.actionMode && x < 6) {
+      const ch1 = x + 1;
+      if (this.actionMode === 'randomize') {
+        this.engine.randomize(ch1);
+        console.log(`[randomize] ch${ch1}`);
+      } else if (this.actionMode === 'mutate') {
+        this.engine.mutate(ch1);
+        console.log(`[mutate] ch${ch1}`);
+      } else if (this.actionMode === 'clear') {
+        this.clearChannelParam(x);
+      }
+      this.actionMode = null;
+      this.renderAll(); this.updateStatus(); return;
+    }
+
     if (x < 6) {
       const ch1 = x + 1;
       if (this.engine.isRunning(x)) this.engine.stop(ch1);
       else this.engine.launch(ch1);
     }
-    // 6..11 unused; 12..15 reserved for scenes
+    // cols 6-11 unused
   }
 
   private handleRow7(x: number): void {
@@ -395,58 +446,33 @@ export class GridController {
         this.selectedParam = PARAMS[x];
         this.paramLayer = 'A';
       }
-      this.picker = null;  // invalidate any open picker when layer/param changes
+      this.picker = null;
       this.renderAll();
       this.updateStatus();
     } else if (x === SCALE_BUTTON_COL) {
       this.openScalePicker();
-    } else if (x === QUANTIZE_BUTTON_COL) {
-      this.handleQuantizeButton();
-    } else if (x === MUTE_BUTTON_COL) {
-      this.muteMode = !this.muteMode;
-      if (this.muteMode) this.truncateMode = false;
+    } else if (x === CLR_BUTTON_COL) {
+      this.actionMode = this.actionMode === 'clear' ? null : 'clear';
+      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
-    } else if (x === TRUNCATE_BUTTON_COL) {
-      this.truncateMode = !this.truncateMode;
-      if (this.truncateMode) this.muteMode = false;
+    } else if (x === LOCK_BUTTON_COL) {
+      this.actionMode = this.actionMode === 'lock' ? null : 'lock';
+      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
-    } else if (x === ENV_MODE_BUTTON_COL) {
-      this.engine.envMode = ((this.engine.envMode + 1) % 3) as 0 | 1 | 2;
-      this.renderRow7();
+    } else if (x === RANDOMIZE_BUTTON_COL) {
+      this.actionMode = this.actionMode === 'randomize' ? null : 'randomize';
+      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      this.renderAll();
       this.updateStatus();
-    } else if (x === GEODE_MODE_BUTTON_COL) {
-      this.engine.geodeMode = ((this.engine.geodeMode + 1) % 4) as 0 | 1 | 2 | 3;
-      this.renderRow7();
+    } else if (x === MUTATE_BUTTON_COL) {
+      this.actionMode = this.actionMode === 'mutate' ? null : 'mutate';
+      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      this.renderAll();
       this.updateStatus();
-    } else if (x === KB_MODE_BUTTON_COL) {
-      this.enterKbMode();
     }
-  }
-
-  // Single-click toggles the picker; double-click within DOUBLE_CLICK_MS
-  // disables quantize (sets to 0). Works whether the picker is currently
-  // open or closed, so a fast tap-tap always disables.
-  private handleQuantizeButton(): void {
-    const now = Date.now();
-    const isDouble = (now - this.quantizeClickTime) < DOUBLE_CLICK_MS;
-    this.quantizeClickTime = isDouble ? 0 : now;
-
-    if (isDouble) {
-      this.engine.quantize = 0;
-      console.log('[quantize] 0 (double-click disabled)');
-      if (this.picker?.kind === 'quantize') this.closePicker();
-      else this.renderRow7();
-      return;
-    }
-
-    if (this.picker?.kind === 'quantize') {
-      this.closePicker();
-    } else {
-      if (this.picker) this.closePicker();
-      this.openQuantizePicker();
-    }
+    // cols 7-8 and 10-13 are dark/unhandled
   }
 
   // ---- rendering ---------------------------------------------------------
@@ -467,9 +493,8 @@ export class GridController {
   private renderPicker(): void {
     if (!this.picker) return;
     switch (this.picker.kind) {
-      case 'step':     this.renderStepPicker(this.picker); break;
-      case 'scale':    this.renderScalePicker(); break;
-      case 'quantize': this.renderQuantizePicker(); break;
+      case 'step':  this.renderStepPicker(this.picker); break;
+      case 'scale': this.renderScalePicker(); break;
     }
   }
 
@@ -506,39 +531,25 @@ export class GridController {
     }
   }
 
-  private renderQuantizePicker(): void {
-    const cur = this.engine.quantize;
-    for (let y = 0; y < 2; y++) {
-      for (let x = 0; x < GRID_W; x++) {
-        const v = QUANTIZE_PICKER[y * GRID_W + x];
-        this.grid.setLed(x, y, v === cur ? 15 : 5);
-      }
-    }
-  }
-
   private renderChannelRow(ch: number): void {
+    if (this.probMode)     { this.renderProbRow(ch); return; }
+    if (this.quantizeMode) { this.renderQuantizeRow(ch); return; }
+    if (this.soundMode)    { this.renderSoundRow(ch); return; }
     const param = this.selectedParam;
     const layer = this.paramLayer;
     const seq = this.seqRef(ch, param, layer);
     const vals = seq.values;
-    const mute = (param === 'note' && layer === 'A')
-      ? this.engine.channels[ch].noteMute
-      : null;
 
     for (let i = 0; i < GRID_W; i++) {
       if (i < vals.length) {
-        const isMuted = mute?.[i] === true;
-        const b = isMuted
-          ? (this.muteMode ? 6 : 2)
-          : valueBrightness(param, vals[i]);
-        this.grid.setLed(i, ch, b);
-        this.grid.setStrobe(i, ch, isMuted && this.muteMode);
+        this.grid.setLed(i, ch, valueBrightness(param, vals[i]));
+        this.grid.setStrobe(i, ch, 'off');
       } else if (i === vals.length && vals.length < GRID_W) {
         this.grid.setLed(i, ch, 1);
-        this.grid.setStrobe(i, ch, false);
+        this.grid.setStrobe(i, ch, 'off');
       } else {
         this.grid.setLed(i, ch, 0);
-        this.grid.setStrobe(i, ch, false);
+        this.grid.setStrobe(i, ch, 'off');
       }
     }
 
@@ -552,34 +563,96 @@ export class GridController {
     }
   }
 
-  private renderRow6(): void {
+  private renderProbRow(ch: number): void {
+    const state = this.engine.channels[ch];
+    const col = Math.round(state.burstProb * 14);
+    for (let i = 0; i < 15; i++) {
+      this.grid.setLed(i, ch, i === col ? 15 : 1);
+      this.grid.setStrobe(i, ch, 'off');
+    }
+    // Col 15: burst/hit toggle — dim=burst, bright=hit, slow-strobes when hit mode active
+    this.grid.setLed(15, ch, state.probHit ? 14 : 4);
+    this.grid.setStrobe(15, ch, state.probHit ? 'slow' : 'off');
+  }
+
+  private renderQuantizeRow(ch: number): void {
+    const cur = this.engine.quantize;
+    for (let x = 0; x < GRID_W; x++) {
+      this.grid.setLed(x, ch, QUANTIZE_VALUES[x] === cur ? 15 : 3);
+      this.grid.setStrobe(x, ch, 'off');
+    }
+  }
+
+  private renderSoundRow(ch: number): void {
+    const { envMode, geodeMode } = this.engine.channels[ch];
+    for (let x = 0; x < GRID_W; x++) {
+      this.grid.setLed(x, ch, 0);
+      this.grid.setStrobe(x, ch, 'off');
+    }
+    for (let m = 0; m < 3; m++) this.grid.setLed(m, ch, envMode === m ? 15 : 4);
+    // col 3 = dark separator
+    for (let m = 0; m < 4; m++) this.grid.setLed(m + 4, ch, geodeMode === m ? 15 : 4);
+  }
+
+  private renderActionMode(): void {
     for (let x = 0; x < 6; x++) {
-      this.grid.setLed(x, 6, this.engine.isRunning(x) ? 15 : 4);
+      const b = this.actionMode === 'lock'
+        ? (this.engine.channels[x].locked ? 15 : 4)
+        : 10;
+      this.grid.setLed(x, 6, b);
     }
     for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
-    for (let x = 12; x < GRID_W; x++) this.grid.setLed(x, 6, 1); // scene stub
+    // Keep mode buttons visible at mid brightness during action mode
+    this.grid.setLed(ROW6_KB_COL,   6, 8);
+    this.grid.setLed(ROW6_PROB_COL, 6, 8);
+    this.grid.setLed(ROW6_QNT_COL,  6, 8);
+    this.grid.setLed(ROW6_SND_COL,  6, 8);
+  }
+
+  private renderRow6(): void {
+    if (this.actionMode) {
+      this.renderActionMode();
+    } else {
+      for (let x = 0; x < 6; x++) {
+        this.grid.setLed(x, 6, this.engine.isRunning(x) ? 15 : 4);
+      }
+      for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
+    }
+    // Mode access buttons always visible (cols 12-15)
+    this.grid.setLed(ROW6_KB_COL, 6, 8);
+    this.grid.setLed(ROW6_PROB_COL, 6, this.probMode ? 15 : 8);
+    this.grid.setStrobe(ROW6_PROB_COL, 6, this.probMode ? 'fast' : 'off');
+    this.grid.setLed(ROW6_QNT_COL, 6, this.quantizeMode ? 15 : 8);
+    this.grid.setStrobe(ROW6_QNT_COL, 6, this.quantizeMode ? 'fast' : 'off');
+    this.grid.setLed(ROW6_SND_COL, 6, this.soundMode ? 15 : 8);
+    this.grid.setStrobe(ROW6_SND_COL, 6, this.soundMode ? 'fast' : 'off');
   }
 
   private renderRow7(): void {
+    // Params 0-5
     for (let x = 0; x < PARAMS.length; x++) {
       const isSelected = PARAMS[x] === this.selectedParam;
       this.grid.setLed(x, 7, isSelected ? 15 : 5);
-      this.grid.setStrobe(x, 7, isSelected && this.paramLayer === 'B');
+      this.grid.setStrobe(x, 7, isSelected && this.paramLayer === 'B' ? 'slow' : 'off');
     }
-    const scaleOpen = this.picker?.kind === 'scale';
-    this.grid.setLed(SCALE_BUTTON_COL, 7, scaleOpen ? 15 : 8);
-    const qOpen = this.picker?.kind === 'quantize';
-    const qBright = qOpen ? 15 : (this.engine.quantize > 0 ? 8 : 2);
-    this.grid.setLed(QUANTIZE_BUTTON_COL, 7, qBright);
-    // Mute mode button — bright + strobing while active so it visually echoes
-    // the muted cells it targets.
-    this.grid.setLed(MUTE_BUTTON_COL, 7, this.muteMode ? 15 : 4);
-    this.grid.setStrobe(MUTE_BUTTON_COL, 7, this.muteMode);
-    this.grid.setLed(TRUNCATE_BUTTON_COL, 7, this.truncateMode ? 15 : 4);
-    this.grid.setStrobe(TRUNCATE_BUTTON_COL, 7, this.truncateMode);
-    this.grid.setLed(ENV_MODE_BUTTON_COL, 7, ENV_MODE_BRIGHTNESS[this.engine.envMode]);
-    this.grid.setLed(GEODE_MODE_BUTTON_COL, 7, GEODE_MODE_BRIGHTNESS[this.engine.geodeMode]);
-    for (let x = 12; x < GRID_W; x++) this.grid.setLed(x, 7, 0);
+    // Scale picker
+    this.grid.setLed(SCALE_BUTTON_COL, 7, this.picker?.kind === 'scale' ? 15 : 8);
+    // Dark gaps at 7, 8
+    this.grid.setLed(7, 7, 0);
+    this.grid.setLed(8, 7, 0);
+    // Clear (arms pick-a-channel mode)
+    this.grid.setLed(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 15 : 4);
+    this.grid.setStrobe(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 'fast' : 'off');
+    // Lock (toggle per-channel locked mode)
+    this.grid.setLed(LOCK_BUTTON_COL, 7, this.actionMode === 'lock' ? 15 : 4);
+    this.grid.setStrobe(LOCK_BUTTON_COL, 7, this.actionMode === 'lock' ? 'fast' : 'off');
+    // Dark gaps at 11-13
+    for (let x = 11; x < 14; x++) this.grid.setLed(x, 7, 0);
+    // Randomize and Mutate
+    this.grid.setLed(RANDOMIZE_BUTTON_COL, 7, this.actionMode === 'randomize' ? 15 : 4);
+    this.grid.setStrobe(RANDOMIZE_BUTTON_COL, 7, this.actionMode === 'randomize' ? 'fast' : 'off');
+    this.grid.setLed(MUTATE_BUTTON_COL, 7, this.actionMode === 'mutate' ? 15 : 4);
+    this.grid.setStrobe(MUTATE_BUTTON_COL, 7, this.actionMode === 'mutate' ? 'fast' : 'off');
   }
 
   // ---- keyboard mode -----------------------------------------------------
@@ -648,7 +721,7 @@ export class GridController {
         }
         return;
       }
-      if (x === KB_MODE_BUTTON_COL)  { this.exitKbMode(); return; }
+      if (x === KB_EXIT_COL)  { this.exitKbMode(); return; }
       if (x === KB_PAGE_BUTTON_COL)  {
         this.kbPage = this.kbPage === 1 ? 2 : 1;
         this.renderAll();
@@ -697,7 +770,7 @@ export class GridController {
       } else {
         const v = STEP_PICKER_VALUES['env'][(y - 4) * GRID_W + x];
         this.kbEnvBuffer.push(v);
-        console.log(`[kb env] ${v.toFixed(3)} len=${this.kbEnvBuffer.length}`);
+        console.log(`[kb env] ${Math.round(v * 31)} len=${this.kbEnvBuffer.length}`);
       }
       this.commitKbBuffers(this.kbChannel);
       this.renderAll();
@@ -785,11 +858,11 @@ export class GridController {
     for (let x = 0; x < 6; x++) {
       const isSelected = x === this.kbChannel;
       this.grid.setLed(x, 7, isSelected ? 15 : 4);
-      this.grid.setStrobe(x, 7, isSelected && this.kbBLayer);
+      this.grid.setStrobe(x, 7, isSelected && this.kbBLayer ? 'slow' : 'off');
     }
     for (let x = 6; x < 12; x++) this.grid.setLed(x, 7, 0);
-    this.grid.setLed(KB_MODE_BUTTON_COL,   7, 15);
-    this.grid.setStrobe(KB_MODE_BUTTON_COL, 7, true);
+    this.grid.setLed(KB_EXIT_COL,   7, 15);
+    this.grid.setStrobe(KB_EXIT_COL, 7, 'fast');
     this.grid.setLed(KB_PAGE_BUTTON_COL,   7, this.kbPage === 1 ? 15 : 8);
     this.grid.setLed(KB_CLEAR_BUTTON_COL,  7, 4);
     for (let x = 15; x < GRID_W; x++) this.grid.setLed(x, 7, 0);
@@ -811,35 +884,49 @@ export class GridController {
         `KB MODE ch${this.kbChannel + 1} · ${page}${layerTag} · ${counts} — row7 col12 to commit/exit`;
       return;
     }
-    if (this.muteMode) {
+    if (this.probMode) {
+      const probs = this.engine.channels.map((c, i) =>
+        `ch${i + 1}:${Math.round(c.burstProb * 100)}%${c.probHit ? '(hit)' : ''}`).join(' ');
       this.statusEl.textContent =
-        `MUTE mode — tap a step to toggle silence · tap mute button (row 7 col 8) to exit`;
+        `PROB — cols 0-14: probability · col 15: burst/hit toggle · ${probs}`;
       return;
     }
-    if (this.truncateMode) {
-      this.statusEl.textContent =
-        `TRUNCATE mode — tap a step to trim ${this.selectedParam} ${this.paramLayer} sequence to that length · tap truncate button (row 7 col 9) to exit`;
+    if (this.quantizeMode) {
+      this.statusEl.textContent = `QUANTIZE — cols 0-12: 4..16 · cols 13-15: 32/64/128 · current: ${this.engine.quantize}`;
+      return;
+    }
+    if (this.soundMode) {
+      const info = this.engine.channels.map((c, i) =>
+        `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}`).join(' ');
+      this.statusEl.textContent = `SOUND — cols 0-2: env · cols 4-7: geode · ${info}`;
+      return;
+    }
+    if (this.actionMode === 'lock') {
+      const states = this.engine.channels.map((c, i) => `ch${i + 1}:${c.locked ? 'locked' : 'free'}`).join(' ');
+      this.statusEl.textContent = `LOCK — tap a channel to toggle · ${states} — tap LOCK again to exit`;
+      return;
+    }
+    if (this.actionMode) {
+      const desc = this.actionMode === 'clear'
+        ? `CLEAR ${this.selectedParam} — tap a channel`
+        : `${this.actionMode.toUpperCase()} — tap a channel`;
+      this.statusEl.textContent = `${desc} · tap button again to cancel`;
       return;
     }
     const p = this.picker;
     if (p?.kind === 'step') {
-      const v = this.seqRef(p.ch, this.selectedParam, p.layer).values[p.col];
+      const raw = this.seqRef(p.ch, this.selectedParam, p.layer).values[p.col];
+      const v = this.selectedParam === 'env' ? Math.round(raw * 31) : raw;
       const layerTag = p.layer === 'B' ? `${this.selectedParam}B` : this.selectedParam;
       this.statusEl.textContent =
         `editing ch${p.ch + 1} step ${p.col} ${layerTag}=${v} — pick on rows 0-1, tap step again to remove`;
     } else if (p?.kind === 'scale') {
-      this.statusEl.textContent =
-        `pick a scale on rows 0-1 — tap scale button again to cancel`;
-    } else if (p?.kind === 'quantize') {
-      this.statusEl.textContent =
-        `pick quantize on rows 0-1 (1..32) — double-click button to disable, tap again to cancel`;
+      this.statusEl.textContent = `pick a scale on rows 0-1 — tap scale button again to cancel`;
     } else {
-      const envMode = ENV_MODE_NAMES[this.engine.envMode];
-      const geodeMode = GEODE_MODE_NAMES[this.engine.geodeMode];
       const layerHint = this.paramLayer === 'B'
-        ? `B layer (press ${this.selectedParam} button again for A)`
-        : `A layer (press ${this.selectedParam} button again for B · up to 16 steps)`;
-      this.statusEl.textContent = `editing ${this.selectedParam} · ${layerHint} · env: ${envMode} · geode: ${geodeMode}`;
+        ? `B layer (press ${this.selectedParam} again for A)`
+        : `A layer (press ${this.selectedParam} again for B · up to 16 steps)`;
+      this.statusEl.textContent = `editing ${this.selectedParam} · ${layerHint}`;
     }
   }
 }
