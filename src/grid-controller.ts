@@ -12,7 +12,7 @@ import { scales, ScaleName } from './scales';
 // Display modes (row 6 right side — latch, mutually exclusive):
 //   PROB (col 13): rows 0-5 each show a probability slider for that channel
 //     cols 0..14 = burst probability 0-100% · col 15 = burst/hit toggle
-//   QNT (col 14): rows 0-5 each show a quantize slider (3..18, one value per col)
+//   QNT (col 14): opens the scale+quantize picker (same as row 7 col 6)
 //   SND (col 15): rows 0-5 each show env (cols 0-2) and geode (cols 4-7) per channel
 //
 // Row 7 action modes (momentary — arm, then tap a channel in row 6):
@@ -59,14 +59,14 @@ const KB_SCALE_NAMES: readonly ScaleName[] = [
   'chromatic', 'major', 'minor', 'pentatonic', 'dorian', 'akebono', 'hijaz', 'kurd',
 ];
 
-// Scale picker layout. Two rows split the catalogue by region.
-const SCALE_PICKER_ROWS: readonly ScaleName[][] = [
-  ['chromatic', 'major', 'minor', 'pentatonic', 'dorian'],
-  ['akebono', 'hijaz', 'kurd', 'bayati', 'rast', 'zen', 'wuSheng'],
+// Scale picker: all 12 scales on a single row (cols 0-11, cols 12-15 dark).
+const SCALE_NAMES: readonly ScaleName[] = [
+  'chromatic', 'major', 'minor', 'pentatonic', 'dorian',
+  'akebono', 'hijaz', 'kurd', 'bayati', 'rast', 'zen', 'wuSheng',
 ];
 
-// Per-channel quantize slider: cols 0-12 → 4..16, cols 13-15 → 32, 64, 128.
-const QUANTIZE_VALUES: readonly number[] = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64, 128];
+// Quantize: 1-16 events per whole note, one value per grid column.
+const QUANTIZE_VALUES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
 const ENV_MODE_NAMES:   readonly string[] = ['shape', 'burst', 'hit'];
 const GEODE_MODE_NAMES: readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
@@ -138,7 +138,6 @@ export class GridController {
   private selectedParam: ParamName = 'note';
   private picker: Picker | null = null;
   private probMode     = false;
-  private quantizeMode = false;
   private soundMode    = false;
   private actionMode: 'randomize' | 'mutate' | 'clear' | 'lock' | null = null;
   private statusEl: HTMLElement | null;
@@ -204,13 +203,6 @@ export class GridController {
         this.renderChannelRow(y);
         return;
       }
-      if (this.quantizeMode) {
-        const v = QUANTIZE_VALUES[x];
-        this.engine.quantize = v;
-        console.log(`[quantize] ${v}`);
-        for (let ch = 0; ch < NUM_CHANNELS; ch++) this.renderChannelRow(ch);
-        return;
-      }
       if (this.soundMode) {
         const ch = this.engine.channels[y];
         if (x <= 2) {
@@ -265,13 +257,21 @@ export class GridController {
     if (p.kind === 'step') {
       const v = STEP_PICKER_VALUES[this.selectedParam][y * GRID_W + x];
       this.setStep(p.ch, p.col, v, p.layer);
+      this.closePicker();
     } else if (p.kind === 'scale') {
-      const name = SCALE_PICKER_ROWS[y]?.[x];
-      if (!name) return;
-      this.engine.scale = scales[name];
-      console.log(`[scale] ${name}`);
+      if (y === 0) {
+        const name = SCALE_NAMES[x];
+        if (!name) return;
+        this.engine.scale = scales[name];
+        console.log(`[scale] ${name}`);
+        this.closePicker();
+      } else { // y === 1: quantize row
+        const v = QUANTIZE_VALUES[x];
+        this.engine.quantize = v;
+        console.log(`[quantize] ${v}`);
+        this.renderAll();
+      }
     }
-    this.closePicker();
   }
 
   // ---- picker enter/exit -------------------------------------------------
@@ -393,17 +393,15 @@ export class GridController {
     if (x === ROW6_KB_COL)   { this.enterKbMode(); return; }
     if (x === ROW6_PROB_COL) {
       this.probMode = !this.probMode;
-      if (this.probMode) { this.quantizeMode = false; this.soundMode = false; this.actionMode = null; }
+      if (this.probMode) { this.soundMode = false; this.actionMode = null; }
       this.renderAll(); this.updateStatus(); return;
     }
     if (x === ROW6_QNT_COL) {
-      this.quantizeMode = !this.quantizeMode;
-      if (this.quantizeMode) { this.probMode = false; this.soundMode = false; this.actionMode = null; }
-      this.renderAll(); this.updateStatus(); return;
+      this.openScalePicker(); return;
     }
     if (x === ROW6_SND_COL) {
       this.soundMode = !this.soundMode;
-      if (this.soundMode) { this.probMode = false; this.quantizeMode = false; this.actionMode = null; }
+      if (this.soundMode) { this.probMode = false; this.actionMode = null; }
       this.renderAll(); this.updateStatus(); return;
     }
 
@@ -453,22 +451,22 @@ export class GridController {
       this.openScalePicker();
     } else if (x === CLR_BUTTON_COL) {
       this.actionMode = this.actionMode === 'clear' ? null : 'clear';
-      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === LOCK_BUTTON_COL) {
       this.actionMode = this.actionMode === 'lock' ? null : 'lock';
-      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === RANDOMIZE_BUTTON_COL) {
       this.actionMode = this.actionMode === 'randomize' ? null : 'randomize';
-      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === MUTATE_BUTTON_COL) {
       this.actionMode = this.actionMode === 'mutate' ? null : 'mutate';
-      if (this.actionMode) { this.probMode = false; this.quantizeMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     }
@@ -519,22 +517,23 @@ export class GridController {
 
   private renderScalePicker(): void {
     const active = this.engine.scale;
-    for (let y = 0; y < 2; y++) {
-      for (let x = 0; x < GRID_W; x++) {
-        const name = SCALE_PICKER_ROWS[y]?.[x];
-        let b: number;
-        if (!name)                       b = 0;
-        else if (scales[name] === active) b = 15;
-        else                              b = 5;
-        this.grid.setLed(x, y, b);
-      }
+    for (let x = 0; x < GRID_W; x++) {
+      const name = SCALE_NAMES[x];
+      let b: number;
+      if (!name)                        b = 0;
+      else if (scales[name] === active) b = 15;
+      else                              b = 5;
+      this.grid.setLed(x, 0, b);
+    }
+    const curQ = this.engine.quantize;
+    for (let x = 0; x < GRID_W; x++) {
+      this.grid.setLed(x, 1, QUANTIZE_VALUES[x] === curQ ? 15 : 3);
     }
   }
 
   private renderChannelRow(ch: number): void {
-    if (this.probMode)     { this.renderProbRow(ch); return; }
-    if (this.quantizeMode) { this.renderQuantizeRow(ch); return; }
-    if (this.soundMode)    { this.renderSoundRow(ch); return; }
+    if (this.probMode)  { this.renderProbRow(ch); return; }
+    if (this.soundMode) { this.renderSoundRow(ch); return; }
     const param = this.selectedParam;
     const layer = this.paramLayer;
     const seq = this.seqRef(ch, param, layer);
@@ -573,14 +572,6 @@ export class GridController {
     // Col 15: burst/hit toggle — dim=burst, bright=hit, slow-strobes when hit mode active
     this.grid.setLed(15, ch, state.probHit ? 14 : 4);
     this.grid.setStrobe(15, ch, state.probHit ? 'slow' : 'off');
-  }
-
-  private renderQuantizeRow(ch: number): void {
-    const cur = this.engine.quantize;
-    for (let x = 0; x < GRID_W; x++) {
-      this.grid.setLed(x, ch, QUANTIZE_VALUES[x] === cur ? 15 : 3);
-      this.grid.setStrobe(x, ch, 'off');
-    }
   }
 
   private renderSoundRow(ch: number): void {
@@ -622,8 +613,7 @@ export class GridController {
     this.grid.setLed(ROW6_KB_COL, 6, 8);
     this.grid.setLed(ROW6_PROB_COL, 6, this.probMode ? 15 : 8);
     this.grid.setStrobe(ROW6_PROB_COL, 6, this.probMode ? 'fast' : 'off');
-    this.grid.setLed(ROW6_QNT_COL, 6, this.quantizeMode ? 15 : 8);
-    this.grid.setStrobe(ROW6_QNT_COL, 6, this.quantizeMode ? 'fast' : 'off');
+    this.grid.setLed(ROW6_QNT_COL, 6, 8);
     this.grid.setLed(ROW6_SND_COL, 6, this.soundMode ? 15 : 8);
     this.grid.setStrobe(ROW6_SND_COL, 6, this.soundMode ? 'fast' : 'off');
   }
@@ -891,10 +881,6 @@ export class GridController {
         `PROB — cols 0-14: probability · col 15: burst/hit toggle · ${probs}`;
       return;
     }
-    if (this.quantizeMode) {
-      this.statusEl.textContent = `QUANTIZE — cols 0-12: 4..16 · cols 13-15: 32/64/128 · current: ${this.engine.quantize}`;
-      return;
-    }
     if (this.soundMode) {
       const info = this.engine.channels.map((c, i) =>
         `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}`).join(' ');
@@ -921,7 +907,7 @@ export class GridController {
       this.statusEl.textContent =
         `editing ch${p.ch + 1} step ${p.col} ${layerTag}=${v} — pick on rows 0-1, tap step again to remove`;
     } else if (p?.kind === 'scale') {
-      this.statusEl.textContent = `pick a scale on rows 0-1 — tap scale button again to cancel`;
+      this.statusEl.textContent = `row 0: pick a scale · row 1: quantize 1–16 (current: ${this.engine.quantize}) — tap scale button to cancel`;
     } else {
       const layerHint = this.paramLayer === 'B'
         ? `B layer (press ${this.selectedParam} again for A)`

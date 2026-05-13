@@ -13,6 +13,11 @@ const bpmInput = document.getElementById('bpm') as HTMLInputElement;
 const muteAudio = document.getElementById('mute-audio') as HTMLInputElement;
 const playStopBtn = document.getElementById('play-stop') as HTMLButtonElement;
 const status = document.getElementById('status')!;
+const mainEl = document.getElementById('main')!;
+
+document.getElementById('debug-toggle')!.addEventListener('click', () => {
+  mainEl.classList.toggle('debug');
+});
 
 let booted = false;
 
@@ -73,6 +78,8 @@ startBtn.addEventListener('click', async () => {
     () => new FMVoice(out, { ...defaultVoiceParams }),
   );
   const engine = new BurstEngine(voices);
+  for (let i = 1; i <= 6; i++) engine.randomize(i);
+  for (let i = 0; i < 6; i++) engine.channels[i].noteB = sequins([i * 3]);
   const grid = new Grid(document.getElementById('grid')!);
   const controller = new GridController(engine, grid);
 
@@ -194,5 +201,7 @@ startBtn.addEventListener('click', async () => {
   document.getElementById('audio-overlay')!.classList.add('hidden');
   repl.focus();
 
-  status.textContent = 'running — type into the repl below, cmd-enter (or click run) to evaluate';
+  engine.launch(1);
+  engine.launch(4);
+  status.textContent = 'running';
 });

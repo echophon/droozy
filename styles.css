@@ -325,6 +325,114 @@ main {
   color: var(--fg);
 }
 
+/* ---------- guide (default view) ---------- */
+
+.guide {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  color: var(--dim);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.guide-lede {
+  color: var(--fg);
+  font-size: 0.82rem;
+  line-height: 1.65;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #1a1a1d;
+  margin: 0;
+}
+
+.guide-cols {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.guide-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.guide h4 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin: 0;
+  font-weight: normal;
+}
+
+.guide p {
+  margin: 0;
+}
+
+.guide-dl {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.15rem 0.5rem;
+  margin: 0;
+}
+
+.guide-dl dt {
+  color: var(--fg);
+  font-weight: normal;
+}
+
+.guide-dl dd {
+  margin: 0;
+}
+
+.guide-aside {
+  font-size: 0.72rem;
+  color: #3e3e38;
+  font-style: italic;
+}
+
+/* ---------- debug toggle ---------- */
+
+.debug-toggle-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid #2a2a30;
+  border-radius: 3px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: color 100ms, border-color 100ms;
+}
+
+.debug-toggle-btn:hover {
+  color: var(--fg);
+  border-color: #3a3a40;
+}
+
+#main.debug .debug-toggle-btn {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------- debug show/hide ---------- */
+
+/* default: show guide, hide debug elements */
+#main .guide     { display: flex; }
+#main .repl-help { display: none; }
+#main .repl      { display: none; }
+
+/* debug mode: swap guide for repl-help, show repl below */
+#main.debug .guide     { display: none; }
+#main.debug .repl-help { display: block; }
+#main.debug .repl      { display: flex; }
+
+/* ---------- repl-help (debug view) ---------- */
+
 .repl-help {
   flex: 1;
   font-size: 0.78rem;
