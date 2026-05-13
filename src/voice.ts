@@ -82,12 +82,13 @@ export class FMVoice {
    * Also TODO: pick a voice from the pool here, instead of retriggering the
    * single shared carrier/modulator. As written, fast bursts will choke.
    */
-  // Carrier start-frequency multipliers and sweep durations for each pitchEnv value.
-  // Index 0 = off (unused). Higher index = slower, wider sweep.
   private static readonly PITCH_SWEEP_START = [1, 4, 2, 1.5] as const;
   private static readonly PITCH_SWEEP_TIME  = [0, 0.03, 0.12, 0.35] as const;
+  // Modulator-start multipliers (relative to target mod freq) and durations.
+  private static readonly HARM_SWEEP_START  = [1, 2, 1.5, 1.25] as const;
+  private static readonly HARM_SWEEP_TIME   = [0, 0.05, 0.15, 0.40] as const;
 
-  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, pitchEnv?: number): void {
+  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, pitchEnv?: number, harmEnv?: number): void {
     const lv = Math.max(0, Math.min(1, level));
     // Per-trigger harmonicity overrides the voice default; the burst engine
     // sequences this per-step so each note can have its own timbral character.
@@ -119,18 +120,27 @@ export class FMVoice {
     this.ampEnv.decay = ampDec;
 
     const pEnv = pitchEnv ?? 0;
+    const hEnv = harmEnv ?? 0;
+    const pitchMult = pEnv > 0 ? FMVoice.PITCH_SWEEP_START[pEnv] : 1;
+    const pitchTime = pEnv > 0 ? FMVoice.PITCH_SWEEP_TIME[pEnv] : 0;
+    const harmMult  = hEnv > 0 ? FMVoice.HARM_SWEEP_START[hEnv]  : 1;
+    const harmTime  = hEnv > 0 ? FMVoice.HARM_SWEEP_TIME[hEnv]   : 0;
+    const modEnd    = freq * harm;
+
     if (pEnv > 0) {
-      const startMult = FMVoice.PITCH_SWEEP_START[pEnv];
-      const sweepTime = FMVoice.PITCH_SWEEP_TIME[pEnv];
       this.carrier.frequency.cancelScheduledValues(when);
-      this.carrier.frequency.setValueAtTime(freq * startMult, when);
-      this.carrier.frequency.exponentialRampToValueAtTime(freq, when + sweepTime);
-      this.modulator.frequency.cancelScheduledValues(when);
-      this.modulator.frequency.setValueAtTime(freq * startMult * harm, when);
-      this.modulator.frequency.exponentialRampToValueAtTime(freq * harm, when + sweepTime);
+      this.carrier.frequency.setValueAtTime(freq * pitchMult, when);
+      this.carrier.frequency.exponentialRampToValueAtTime(freq, when + pitchTime);
     } else {
       this.carrier.frequency.setValueAtTime(freq, when);
-      this.modulator.frequency.setValueAtTime(freq * harm, when);
+    }
+    const modStart = freq * pitchMult * harm * harmMult;
+    if (modStart !== modEnd) {
+      this.modulator.frequency.cancelScheduledValues(when);
+      this.modulator.frequency.setValueAtTime(modStart, when);
+      this.modulator.frequency.exponentialRampToValueAtTime(modEnd, when + Math.max(pitchTime, harmTime));
+    } else {
+      this.modulator.frequency.setValueAtTime(modEnd, when);
     }
 
     // Schedule mod-depth envelope directly in Hz (envelope nodes are 0..1; we

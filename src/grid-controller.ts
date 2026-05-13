@@ -13,7 +13,7 @@ import { scales, ScaleName } from './scales';
 //   PROB (col 13): rows 0-5 each show a probability slider for that channel
 //     cols 0..14 = burst probability 0-100% · col 15 = burst/hit toggle
 //   QNT (col 14): opens the scale+quantize picker (same as row 7 col 6)
-//   SND (col 15): rows 0-5 each show env (cols 0-2) and geode (cols 4-7) per channel
+//   SND (col 15): rows 0-5 each show env (0-2) · geode (4-7) · pitch env (8-11) · harm env (12-15) per channel
 //
 // Row 7 action modes (momentary — arm, then tap a channel in row 6):
 //   CLR (col 9):        clear selected param (A+B) for a channel → tap row 6 to pick
@@ -76,6 +76,7 @@ const RESET_COLS:      readonly number[] = [0, 1, 2, 4, 8];
 const ENV_MODE_NAMES:        readonly string[] = ['shape', 'burst', 'hit'];
 const GEODE_MODE_NAMES:      readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
 const PITCH_ENV_MODE_NAMES:  readonly string[] = ['off', 'fast', 'med', 'slow'];
+const HARM_ENV_MODE_NAMES:   readonly string[] = ['off', 'fast', 'med', 'slow'];
 
 // Default value used when a tap appends a new step.
 const DEFAULT_VALUE: Record<ParamName, number> = {
@@ -228,9 +229,12 @@ export class GridController {
         } else if (x >= 4 && x <= 7) {
           ch.geodeMode = (x - 4) as 0 | 1 | 2 | 3;
           console.log(`[ch${y + 1} geode] ${GEODE_MODE_NAMES[x - 4]}`);
-        } else if (x >= 9 && x <= 12) {
-          ch.pitchEnv = (x - 9) as 0 | 1 | 2 | 3;
-          console.log(`[ch${y + 1} pitchEnv] ${PITCH_ENV_MODE_NAMES[x - 9]}`);
+        } else if (x >= 8 && x <= 11) {
+          ch.pitchEnv = (x - 8) as 0 | 1 | 2 | 3;
+          console.log(`[ch${y + 1} pitchEnv] ${PITCH_ENV_MODE_NAMES[x - 8]}`);
+        } else if (x >= 12 && x <= 15) {
+          ch.harmEnv = (x - 12) as 0 | 1 | 2 | 3;
+          console.log(`[ch${y + 1} harmEnv] ${HARM_ENV_MODE_NAMES[x - 12]}`);
         }
         this.renderChannelRow(y);
         return;
@@ -617,16 +621,16 @@ export class GridController {
   }
 
   private renderSoundRow(ch: number): void {
-    const { envMode, geodeMode, pitchEnv } = this.engine.channels[ch];
+    const { envMode, geodeMode, pitchEnv, harmEnv } = this.engine.channels[ch];
     for (let x = 0; x < GRID_W; x++) {
       this.grid.setLed(x, ch, 0);
       this.grid.setStrobe(x, ch, 'off');
     }
-    for (let m = 0; m < 3; m++) this.grid.setLed(m, ch, envMode === m ? 15 : 4);
-    // col 3 = dark separator
-    for (let m = 0; m < 4; m++) this.grid.setLed(m + 4, ch, geodeMode === m ? 15 : 4);
-    // col 8 = dark separator
-    for (let m = 0; m < 4; m++) this.grid.setLed(m + 9, ch, pitchEnv === m ? 15 : 4);
+    // cols 0-2: env mode  |  col 3: dark  |  cols 4-7: geode  |  cols 8-11: pitch env  |  cols 12-15: harm env
+    for (let m = 0; m < 3; m++) this.grid.setLed(m,      ch, envMode   === m ? 15 : 4);
+    for (let m = 0; m < 4; m++) this.grid.setLed(m + 4,  ch, geodeMode === m ? 15 : 4);
+    for (let m = 0; m < 4; m++) this.grid.setLed(m + 8,  ch, pitchEnv  === m ? 15 : 4);
+    for (let m = 0; m < 4; m++) this.grid.setLed(m + 12, ch, harmEnv   === m ? 15 : 4);
   }
 
   private renderActionMode(): void {
@@ -941,8 +945,8 @@ export class GridController {
     }
     if (this.soundMode) {
       const info = this.engine.channels.map((c, i) =>
-        `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}/${PITCH_ENV_MODE_NAMES[c.pitchEnv]}`).join(' ');
-      this.statusEl.textContent = `SOUND — cols 0-2: env · cols 4-7: geode · cols 9-12: pitch env · ${info}`;
+        `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}/${PITCH_ENV_MODE_NAMES[c.pitchEnv]}/${HARM_ENV_MODE_NAMES[c.harmEnv]}`).join(' ');
+      this.statusEl.textContent = `SOUND — 0-2: env · 4-7: geode · 8-11: pitch env · 12-15: harm env · ${info}`;
       return;
     }
     if (this.actionMode === 'lock') {

@@ -41,6 +41,9 @@ export interface ChannelState {
   // Pitch envelope mode: 0=off 1=fast 2=med 3=slow
   // Sweeps carrier (and modulator) from a higher frequency down to the target pitch.
   pitchEnv: 0 | 1 | 2 | 3;
+  // Harmonicity envelope mode: 0=off 1=fast 2=med 3=slow
+  // Sweeps modulator frequency from a more inharmonic ratio down to the target harm value.
+  harmEnv: 0 | 1 | 2 | 3;
   // When true, all A-layer parameters are kept at the same sequence length.
   // Extends or truncates sibling params whenever one param's length changes.
   locked: boolean;
@@ -83,6 +86,7 @@ function defaultChannel(): ChannelState {
     envMode: 0,
     geodeMode: 0,
     pitchEnv: 0,
+    harmEnv: 0,
     locked: true,
   };
 }
@@ -380,7 +384,7 @@ export class BurstEngine {
         ? total * intervalSec
         : intervalSec;
     }
-    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv);
+    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv, this.channels[ch].harmEnv);
     this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
   }
 }
