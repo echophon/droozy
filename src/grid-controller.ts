@@ -43,7 +43,8 @@ const LOCK_BUTTON_COL      = 10;  // toggle locked (equal-length) mode per chann
 const RANDOMIZE_BUTTON_COL = 14;
 const MUTATE_BUTTON_COL    = 15;
 
-// Row 6 right side — mode access (cols 12-15, freed from scenes stub)
+// Row 6 right side — mode access (cols 11-15)
+const ROW6_RST_COL  = 11;
 const ROW6_KB_COL   = 12;
 const ROW6_PROB_COL = 13;
 const ROW6_QNT_COL  = 14;
@@ -68,8 +69,13 @@ const SCALE_NAMES: readonly ScaleName[] = [
 // Quantize: 1-16 events per whole note, one value per grid column.
 const QUANTIZE_VALUES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
-const ENV_MODE_NAMES:   readonly string[] = ['shape', 'burst', 'hit'];
-const GEODE_MODE_NAMES: readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
+// Reset page: col position = bar count (0=off, 1=1bar, 2=2bars, 4=4bars, 8=8bars).
+const RESET_INTERVALS: readonly number[] = [0, 1, 2, 4, 8];
+const RESET_COLS:      readonly number[] = [0, 1, 2, 4, 8];
+
+const ENV_MODE_NAMES:        readonly string[] = ['shape', 'burst', 'hit'];
+const GEODE_MODE_NAMES:      readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
+const PITCH_ENV_MODE_NAMES:  readonly string[] = ['off', 'fast', 'med', 'slow'];
 
 // Default value used when a tap appends a new step.
 const DEFAULT_VALUE: Record<ParamName, number> = {
@@ -138,6 +144,7 @@ export class GridController {
   private selectedParam: ParamName = 'note';
   private picker: Picker | null = null;
   private probMode     = false;
+  private resetMode    = false;
   private soundMode    = false;
   private actionMode: 'randomize' | 'mutate' | 'clear' | 'lock' | null = null;
   private statusEl: HTMLElement | null;
@@ -191,6 +198,16 @@ export class GridController {
 
   private handleNormalPress(x: number, y: number): void {
     if (y < 6) {
+      if (this.resetMode) {
+        const idx = RESET_COLS.indexOf(x);
+        if (idx !== -1) {
+          this.engine.resetInterval = RESET_INTERVALS[idx];
+          const label = RESET_INTERVALS[idx] === 0 ? 'off' : `${RESET_INTERVALS[idx]} bar`;
+          console.log(`[reset] ${label}`);
+          for (let ch = 0; ch < NUM_CHANNELS; ch++) this.renderChannelRow(ch);
+        }
+        return;
+      }
       if (this.probMode) {
         const ch = this.engine.channels[y];
         if (x === 15) {
@@ -211,6 +228,9 @@ export class GridController {
         } else if (x >= 4 && x <= 7) {
           ch.geodeMode = (x - 4) as 0 | 1 | 2 | 3;
           console.log(`[ch${y + 1} geode] ${GEODE_MODE_NAMES[x - 4]}`);
+        } else if (x >= 9 && x <= 12) {
+          ch.pitchEnv = (x - 9) as 0 | 1 | 2 | 3;
+          console.log(`[ch${y + 1} pitchEnv] ${PITCH_ENV_MODE_NAMES[x - 9]}`);
         }
         this.renderChannelRow(y);
         return;
@@ -264,13 +284,12 @@ export class GridController {
         if (!name) return;
         this.engine.scale = scales[name];
         console.log(`[scale] ${name}`);
-        this.closePicker();
       } else { // y === 1: quantize row
         const v = QUANTIZE_VALUES[x];
         this.engine.quantize = v;
         console.log(`[quantize] ${v}`);
-        this.renderAll();
       }
+      this.renderAll();
     }
   }
 
@@ -391,9 +410,14 @@ export class GridController {
   private handleRow6(x: number): void {
     // Mode access buttons (right side, always available)
     if (x === ROW6_KB_COL)   { this.enterKbMode(); return; }
+    if (x === ROW6_RST_COL) {
+      this.resetMode = !this.resetMode;
+      if (this.resetMode) { this.probMode = false; this.soundMode = false; this.actionMode = null; }
+      this.renderAll(); this.updateStatus(); return;
+    }
     if (x === ROW6_PROB_COL) {
       this.probMode = !this.probMode;
-      if (this.probMode) { this.soundMode = false; this.actionMode = null; }
+      if (this.probMode) { this.soundMode = false; this.resetMode = false; this.actionMode = null; }
       this.renderAll(); this.updateStatus(); return;
     }
     if (x === ROW6_QNT_COL) {
@@ -401,7 +425,13 @@ export class GridController {
     }
     if (x === ROW6_SND_COL) {
       this.soundMode = !this.soundMode;
-      if (this.soundMode) { this.probMode = false; this.actionMode = null; }
+      if (this.soundMode) { this.probMode = false; this.resetMode = false; this.actionMode = null; }
+      this.renderAll(); this.updateStatus(); return;
+    }
+
+    if (this.actionMode === 'clear' && x === CLR_BUTTON_COL) {
+      for (let i = 0; i < NUM_CHANNELS; i++) this.clearChannelParam(i);
+      this.actionMode = null;
       this.renderAll(); this.updateStatus(); return;
     }
 
@@ -451,22 +481,22 @@ export class GridController {
       this.openScalePicker();
     } else if (x === CLR_BUTTON_COL) {
       this.actionMode = this.actionMode === 'clear' ? null : 'clear';
-      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === LOCK_BUTTON_COL) {
       this.actionMode = this.actionMode === 'lock' ? null : 'lock';
-      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === RANDOMIZE_BUTTON_COL) {
       this.actionMode = this.actionMode === 'randomize' ? null : 'randomize';
-      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === MUTATE_BUTTON_COL) {
       this.actionMode = this.actionMode === 'mutate' ? null : 'mutate';
-      if (this.actionMode) { this.probMode = false; this.soundMode = false; }
+      if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     }
@@ -533,6 +563,7 @@ export class GridController {
 
   private renderChannelRow(ch: number): void {
     if (this.probMode)  { this.renderProbRow(ch); return; }
+    if (this.resetMode) { this.renderResetRow(ch); return; }
     if (this.soundMode) { this.renderSoundRow(ch); return; }
     const param = this.selectedParam;
     const layer = this.paramLayer;
@@ -574,8 +605,19 @@ export class GridController {
     this.grid.setStrobe(15, ch, state.probHit ? 'slow' : 'off');
   }
 
+  private renderResetRow(ch: number): void {
+    const cur = this.engine.resetInterval;
+    for (let x = 0; x < GRID_W; x++) {
+      this.grid.setLed(x, ch, 0);
+      this.grid.setStrobe(x, ch, 'off');
+    }
+    for (let i = 0; i < RESET_INTERVALS.length; i++) {
+      this.grid.setLed(RESET_COLS[i], ch, RESET_INTERVALS[i] === cur ? 15 : 3);
+    }
+  }
+
   private renderSoundRow(ch: number): void {
-    const { envMode, geodeMode } = this.engine.channels[ch];
+    const { envMode, geodeMode, pitchEnv } = this.engine.channels[ch];
     for (let x = 0; x < GRID_W; x++) {
       this.grid.setLed(x, ch, 0);
       this.grid.setStrobe(x, ch, 'off');
@@ -583,6 +625,8 @@ export class GridController {
     for (let m = 0; m < 3; m++) this.grid.setLed(m, ch, envMode === m ? 15 : 4);
     // col 3 = dark separator
     for (let m = 0; m < 4; m++) this.grid.setLed(m + 4, ch, geodeMode === m ? 15 : 4);
+    // col 8 = dark separator
+    for (let m = 0; m < 4; m++) this.grid.setLed(m + 9, ch, pitchEnv === m ? 15 : 4);
   }
 
   private renderActionMode(): void {
@@ -593,7 +637,13 @@ export class GridController {
       this.grid.setLed(x, 6, b);
     }
     for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
+    // Clear-all: col 9 (above CLR in row 7) lights up when CLR is armed
+    if (this.actionMode === 'clear') {
+      this.grid.setLed(CLR_BUTTON_COL, 6, 15);
+      this.grid.setStrobe(CLR_BUTTON_COL, 6, 'fast');
+    }
     // Keep mode buttons visible at mid brightness during action mode
+    this.grid.setLed(ROW6_RST_COL,  6, 8);
     this.grid.setLed(ROW6_KB_COL,   6, 8);
     this.grid.setLed(ROW6_PROB_COL, 6, 8);
     this.grid.setLed(ROW6_QNT_COL,  6, 8);
@@ -609,7 +659,9 @@ export class GridController {
       }
       for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
     }
-    // Mode access buttons always visible (cols 12-15)
+    // Mode access buttons always visible (cols 11-15)
+    this.grid.setLed(ROW6_RST_COL, 6, this.resetMode ? 15 : 8);
+    this.grid.setStrobe(ROW6_RST_COL, 6, this.resetMode ? 'fast' : 'off');
     this.grid.setLed(ROW6_KB_COL, 6, 8);
     this.grid.setLed(ROW6_PROB_COL, 6, this.probMode ? 15 : 8);
     this.grid.setStrobe(ROW6_PROB_COL, 6, this.probMode ? 'fast' : 'off');
@@ -874,6 +926,12 @@ export class GridController {
         `KB MODE ch${this.kbChannel + 1} · ${page}${layerTag} · ${counts} — row7 col12 to commit/exit`;
       return;
     }
+    if (this.resetMode) {
+      const cur = this.engine.resetInterval;
+      const label = cur === 0 ? 'off' : `every ${cur} bar`;
+      this.statusEl.textContent = `RESET — col 0: off · col 1: 1 bar · col 2: 2 bars · col 4: 4 bars · col 8: 8 bars · current: ${label}`;
+      return;
+    }
     if (this.probMode) {
       const probs = this.engine.channels.map((c, i) =>
         `ch${i + 1}:${Math.round(c.burstProb * 100)}%${c.probHit ? '(hit)' : ''}`).join(' ');
@@ -883,8 +941,8 @@ export class GridController {
     }
     if (this.soundMode) {
       const info = this.engine.channels.map((c, i) =>
-        `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}`).join(' ');
-      this.statusEl.textContent = `SOUND — cols 0-2: env · cols 4-7: geode · ${info}`;
+        `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}/${PITCH_ENV_MODE_NAMES[c.pitchEnv]}`).join(' ');
+      this.statusEl.textContent = `SOUND — cols 0-2: env · cols 4-7: geode · cols 9-12: pitch env · ${info}`;
       return;
     }
     if (this.actionMode === 'lock') {
@@ -894,7 +952,7 @@ export class GridController {
     }
     if (this.actionMode) {
       const desc = this.actionMode === 'clear'
-        ? `CLEAR ${this.selectedParam} — tap a channel`
+        ? `CLEAR ${this.selectedParam} — tap channel (0-5) or col 9 = all channels`
         : `${this.actionMode.toUpperCase()} — tap a channel`;
       this.statusEl.textContent = `${desc} · tap button again to cancel`;
       return;

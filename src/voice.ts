@@ -82,7 +82,12 @@ export class FMVoice {
    * Also TODO: pick a voice from the pool here, instead of retriggering the
    * single shared carrier/modulator. As written, fast bursts will choke.
    */
-  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number): void {
+  // Carrier start-frequency multipliers and sweep durations for each pitchEnv value.
+  // Index 0 = off (unused). Higher index = slower, wider sweep.
+  private static readonly PITCH_SWEEP_START = [1, 4, 2, 1.5] as const;
+  private static readonly PITCH_SWEEP_TIME  = [0, 0.03, 0.12, 0.35] as const;
+
+  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, pitchEnv?: number): void {
     const lv = Math.max(0, Math.min(1, level));
     // Per-trigger harmonicity overrides the voice default; the burst engine
     // sequences this per-step so each note can have its own timbral character.
@@ -113,8 +118,20 @@ export class FMVoice {
     this.ampEnv.attack = attackTime;
     this.ampEnv.decay = ampDec;
 
-    this.carrier.frequency.setValueAtTime(freq, when);
-    this.modulator.frequency.setValueAtTime(freq * harm, when);
+    const pEnv = pitchEnv ?? 0;
+    if (pEnv > 0) {
+      const startMult = FMVoice.PITCH_SWEEP_START[pEnv];
+      const sweepTime = FMVoice.PITCH_SWEEP_TIME[pEnv];
+      this.carrier.frequency.cancelScheduledValues(when);
+      this.carrier.frequency.setValueAtTime(freq * startMult, when);
+      this.carrier.frequency.exponentialRampToValueAtTime(freq, when + sweepTime);
+      this.modulator.frequency.cancelScheduledValues(when);
+      this.modulator.frequency.setValueAtTime(freq * startMult * harm, when);
+      this.modulator.frequency.exponentialRampToValueAtTime(freq * harm, when + sweepTime);
+    } else {
+      this.carrier.frequency.setValueAtTime(freq, when);
+      this.modulator.frequency.setValueAtTime(freq * harm, when);
+    }
 
     // Schedule mod-depth envelope directly in Hz (envelope nodes are 0..1; we
     // need real Hz here). Snappy attack, then exponential decay to near-zero.

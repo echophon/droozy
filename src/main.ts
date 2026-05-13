@@ -83,6 +83,16 @@ startBtn.addEventListener('click', async () => {
   const grid = new Grid(document.getElementById('grid')!);
   const controller = new GridController(engine, grid);
 
+  // Periodic global sequin reset — fires every bar, resets every N bars.
+  let barCount = 0;
+  Tone.getTransport().scheduleRepeat(() => {
+    if (engine.resetInterval <= 0) return;
+    if (++barCount % engine.resetInterval === 0) {
+      engine.resetSequins();
+      controller.refresh();
+    }
+  }, '1m');
+
   const midiSelect = document.getElementById('midi-out') as HTMLSelectElement;
   const midi = new MidiOutput();
   midi.init().then(outputs => {

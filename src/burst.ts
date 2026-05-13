@@ -38,6 +38,9 @@ export interface ChannelState {
   envMode: 0 | 1 | 2;
   // Geode amplitude mode: 0=off 1=transient 2=sustain 3=cycle
   geodeMode: 0 | 1 | 2 | 3;
+  // Pitch envelope mode: 0=off 1=fast 2=med 3=slow
+  // Sweeps carrier (and modulator) from a higher frequency down to the target pitch.
+  pitchEnv: 0 | 1 | 2 | 3;
   // When true, all A-layer parameters are kept at the same sequence length.
   // Extends or truncates sibling params whenever one param's length changes.
   locked: boolean;
@@ -79,6 +82,7 @@ function defaultChannel(): ChannelState {
     probHit: false,
     envMode: 0,
     geodeMode: 0,
+    pitchEnv: 0,
     locked: true,
   };
 }
@@ -131,6 +135,8 @@ export class BurstEngine {
   // Global scale shared across all channels. Direct mutation is fine; call
   // controller.refresh() (or the REPL's `refresh()`) to update the grid.
   scale: readonly number[] = scales.major;
+  // Auto-reset interval in bars (0=off, 1/2/4/8=bars per cycle).
+  resetInterval = 0;
 
   private voices: FMVoice[];
   private tokens: number[] = new Array(NUM_CHANNELS).fill(0);
@@ -374,7 +380,7 @@ export class BurstEngine {
         ? total * intervalSec
         : intervalSec;
     }
-    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec);
+    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv);
     this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
   }
 }
