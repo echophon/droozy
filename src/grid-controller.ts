@@ -6,7 +6,7 @@ import { scales, ScaleName } from './scales';
 // Layout reference:
 //   rows 0..5 = per-channel step view: cols 0..7 = A layer · cols 8..15 = B layer
 //   row 6     = 0..5 launch · 6..11 dark · 12 KB · 13 PROB · 14 QNT · 15 SND
-//   row 7     = 0..5 param (div/reps/note/level/harm/env) · 6-11 dark
+//   row 7     = 0..5 param (div/reps/note/level/harm/env) · 6-10 dark · 11 VOICE
 //             · 12 CLR · 13 LOCK · 14 RANDOMIZE · 15 MUTATE
 //
 // Display modes (row 6 right side — latch, mutually exclusive):
@@ -38,6 +38,7 @@ type ParamName = 'div' | 'reps' | 'note' | 'level' | 'harm' | 'env';
 const PARAMS: ParamName[] = ['div', 'reps', 'note', 'level', 'harm', 'env'];
 
 // Row 7 buttons
+const VOICE_TOGGLE_COL     = 11;  // toggle voice engine (JF additive ↔ FM) per channel
 const CLR_BUTTON_COL       = 12;  // clear selected param on a channel
 const LOCK_BUTTON_COL      = 13;  // toggle locked (equal-length) mode per channel
 const RANDOMIZE_BUTTON_COL = 14;
@@ -148,7 +149,7 @@ export class GridController {
   private probMode     = false;
   private resetMode    = false;
   private soundMode    = false;
-  private actionMode: 'randomize' | 'mutate' | 'clear' | 'lock' | null = null;
+  private actionMode: 'randomize' | 'mutate' | 'clear' | 'lock' | 'voice' | null = null;
   private statusEl: HTMLElement | null;
 
   private paramLayer: Layer = 'A';
@@ -442,6 +443,12 @@ export class GridController {
       this.renderAll(); this.updateStatus(); return;
     }
 
+    if (this.actionMode === 'voice' && x < 6) {
+      this.engine.toggleVoice(x);
+      console.log(`[voice] ch${x + 1} ${this.engine.getVoiceType(x)}`);
+      this.renderAll(); this.updateStatus(); return;
+    }
+
     if (this.actionMode === 'lock' && x < 6) {
       const c = this.engine.channels[x];
       c.locked = !c.locked;
@@ -481,6 +488,11 @@ export class GridController {
         this.paramLayer = 'A';
       }
       this.picker = null;
+      this.renderAll();
+      this.updateStatus();
+    } else if (x === VOICE_TOGGLE_COL) {
+      this.actionMode = this.actionMode === 'voice' ? null : 'voice';
+      if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
       this.renderAll();
       this.updateStatus();
     } else if (x === CLR_BUTTON_COL) {
@@ -638,9 +650,14 @@ export class GridController {
 
   private renderActionMode(): void {
     for (let x = 0; x < 6; x++) {
-      const b = this.actionMode === 'lock'
-        ? (this.engine.channels[x].locked ? 15 : 4)
-        : 10;
+      let b: number;
+      if (this.actionMode === 'lock') {
+        b = this.engine.channels[x].locked ? 15 : 4;
+      } else if (this.actionMode === 'voice') {
+        b = this.engine.getVoiceType(x) === 'jf' ? 15 : 6;
+      } else {
+        b = 10;
+      }
       this.grid.setLed(x, 6, b);
     }
     for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
@@ -679,8 +696,10 @@ export class GridController {
       this.grid.setLed(x, 7, isSelected ? 15 : 5);
       this.grid.setStrobe(x, 7, isSelected && this.paramLayer === 'B' ? 'slow' : 'off');
     }
-    // Dark gaps at 6-11
-    for (let x = 6; x < 12; x++) this.grid.setLed(x, 7, 0);
+    // Dark gaps at 6-10; voice toggle at 11
+    for (let x = 6; x < 11; x++) this.grid.setLed(x, 7, 0);
+    this.grid.setLed(VOICE_TOGGLE_COL, 7, this.actionMode === 'voice' ? 15 : 4);
+    this.grid.setStrobe(VOICE_TOGGLE_COL, 7, this.actionMode === 'voice' ? 'fast' : 'off');
     // Clear · Lock · Randomize · Mutate
     this.grid.setLed(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 15 : 4);
     this.grid.setStrobe(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 'fast' : 'off');
@@ -938,6 +957,11 @@ export class GridController {
       const info = this.engine.channels.map((c, i) =>
         `ch${i + 1}:${ENV_MODE_NAMES[c.envMode]}/${GEODE_MODE_NAMES[c.geodeMode]}/${PITCH_ENV_MODE_NAMES[c.pitchEnv]}/${HARM_ENV_MODE_NAMES[c.harmEnv]}`).join(' ');
       this.statusEl.textContent = `SOUND — 0-2: env · 4-7: geode · 8-11: pitch env · 12-15: harm env · ${info}`;
+      return;
+    }
+    if (this.actionMode === 'voice') {
+      const states = this.engine.channels.map((c, i) => `ch${i + 1}:${c.voiceType.toUpperCase()}`).join(' ');
+      this.statusEl.textContent = `VOICE — bright=JF · dim=FM · tap a channel to toggle · ${states} — tap VOICE again to exit`;
       return;
     }
     if (this.actionMode === 'lock') {

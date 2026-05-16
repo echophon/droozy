@@ -1,5 +1,11 @@
 import * as Tone from 'tone';
 
+export interface Voice {
+  triggerAt(when: number, freq: number, level: number,
+    harmonicity?: number, env?: number, decaySec?: number,
+    pitchEnv?: number, harmEnv?: number): void;
+}
+
 export interface VoiceParams {
   /** carrier:modulator frequency ratio. 1 = same pitch, 2 = octave up, etc. */
   harmonicity: number;
@@ -28,7 +34,7 @@ interface PoolVoice {
   ampEnv: Tone.AmplitudeEnvelope;
 }
 
-export class FMVoice {
+export class FMVoice implements Voice {
   private params: VoiceParams;
   private out: Tone.Gain;
 

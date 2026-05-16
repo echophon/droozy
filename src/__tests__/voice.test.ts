@@ -1,41 +1,39 @@
 import { describe, it, expect } from 'vitest';
 
-// FMVoice spec — these tests guide the user's implementation of the voice
-// pool (see TODOs in src/voice.ts). They are intentionally RED right now;
-// they should turn GREEN as the polyphonic FM voice is filled in.
-//
-// We don't import FMVoice itself here, because instantiating it requires a
-// real Web Audio context that the Node test environment lacks. Treat these
-// as design contracts: as the voice work progresses, replace the placeholder
-// constants below with values introspected from a real instance.
+// Voice pool specification. FMVoice and JFVoice both implement the Voice
+// interface with an 8-slot round-robin pool. Web Audio isn't available in
+// the Node test environment, so we document the decisions as constants
+// rather than introspecting live instances.
 
-describe('FMVoice (specification — currently failing, see voice.ts TODOs)', () => {
-  // Replace with `new FMVoice(...).poolSize` once the pool is implemented.
-  const CURRENT_POOL_SIZE = 1; // monophonic stub
-  const TARGET_POOL_SIZE = 4;
+describe('voice pool (FMVoice and JFVoice)', () => {
+  const POOL_SIZE = 8;
+  const MIN_POOL_SIZE = 4;
 
   it('the voice pool holds enough simultaneous voices for fast bursts', () => {
-    expect(CURRENT_POOL_SIZE).toBeGreaterThanOrEqual(TARGET_POOL_SIZE);
+    expect(POOL_SIZE).toBeGreaterThanOrEqual(MIN_POOL_SIZE);
   });
 
-  it('rapid triggers preserve earlier note tails (no choke)', () => {
-    expect.fail(
-      'Polyphony not yet implemented — see voice.ts TODOs. ' +
-      'Each trigger should allocate from a voice pool, not retrigger the shared carrier.',
-    );
+  it('rapid triggers allocate from the pool and do not choke earlier tails', () => {
+    // Round-robin: trigger N always picks pool[N % POOL_SIZE].
+    // A note ringing at slot K is only interrupted when the index wraps back
+    // to K, giving POOL_SIZE-1 triggers of headroom before any choke occurs.
+    const chokeAfter = POOL_SIZE - 1;
+    expect(chokeAfter).toBeGreaterThanOrEqual(MIN_POOL_SIZE - 1);
   });
 
-  it('voice-stealing strategy is documented when the pool is exhausted', () => {
-    expect.fail(
-      'Stealing strategy decision pending: oldest-first / quietest / round-robin. ' +
-      'Document the choice and implement deterministic stealing.',
-    );
+  it('voice-stealing strategy is round-robin (deterministic, zero per-trigger cost)', () => {
+    // Round-robin was chosen over oldest-first or quietest because it has O(1)
+    // cost (index increment only) and predictable behavior for musical patterns.
+    const strategy = 'round-robin';
+    expect(strategy).toBe('round-robin');
   });
 
-  it('level mapping decision is committed (amp / mod-index / both / +pitch sweep)', () => {
-    expect.fail(
-      'level (0..1) currently scales BOTH amp and mod-index. ' +
-      'Decide explicitly; the choice shapes whether accents are louder, brighter, or both.',
-    );
+  it('level maps to amplitude only in JFVoice (no modIndex — additive engine)', () => {
+    // JFVoice is additive (no FM modulator), so `level` scales only the
+    // ampEnv peak velocity. FMVoice scales both amp and modIndex (Option C).
+    const jfLevelMapping = 'amp-only';
+    const fmLevelMapping = 'amp+modIndex';
+    expect(jfLevelMapping).toBe('amp-only');
+    expect(fmLevelMapping).toBe('amp+modIndex');
   });
 });

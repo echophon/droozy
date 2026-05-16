@@ -3,7 +3,7 @@ import { Sequins, SumLayers, asSeq, isSumLayers, sequins } from './sequins';
 import { scales, degreeToFreq } from './scales';
 import { getBeats, waitUntilBeat } from './clock';
 import { snapBeat } from './quantize';
-import type { FMVoice } from './voice';
+import type { Voice } from './voice';
 
 export const NUM_CHANNELS = 6;
 
@@ -51,6 +51,8 @@ export interface ChannelState {
   resetInterval: number;
   // Playback rate multiplier: 0.25=25%, 0.5=50%, 1=100%, 2=200%, 4=400%.
   rate: number;
+  // Active voice engine for this channel.
+  voiceType: 'fm' | 'jf';
 }
 
 type LaunchVal = number | Sequins<number> | SumLayers<number>;
@@ -94,6 +96,7 @@ function defaultChannel(): ChannelState {
     locked: true,
     resetInterval: 0,
     rate: 1,
+    voiceType: 'fm',
   };
 }
 
@@ -145,17 +148,28 @@ export class BurstEngine {
   // Global scale shared across all channels. Direct mutation is fine; call
   // controller.refresh() (or the REPL's `refresh()`) to update the grid.
   scale: readonly number[] = scales.major;
-  private voices: FMVoice[];
+  private jfVoices: Voice[];
+  private fmVoices: Voice[];
   private tokens: number[] = new Array(NUM_CHANNELS).fill(0);
   private running: boolean[] = new Array(NUM_CHANNELS).fill(false);
   private listeners = new Set<Listener>();
 
-  constructor(voices: FMVoice[]) {
-    if (voices.length !== NUM_CHANNELS) {
-      throw new Error(`expected ${NUM_CHANNELS} voices, got ${voices.length}`);
+  constructor(jfVoices: Voice[], fmVoices: Voice[]) {
+    if (jfVoices.length !== NUM_CHANNELS || fmVoices.length !== NUM_CHANNELS) {
+      throw new Error(`expected ${NUM_CHANNELS} voices per engine`);
     }
-    this.voices = voices;
+    this.jfVoices = jfVoices;
+    this.fmVoices = fmVoices;
     this.channels = Array.from({ length: NUM_CHANNELS }, defaultChannel);
+  }
+
+  toggleVoice(ch: number): void {
+    const c = this.channels[ch];
+    c.voiceType = c.voiceType === 'jf' ? 'fm' : 'jf';
+  }
+
+  getVoiceType(ch: number): 'fm' | 'jf' {
+    return this.channels[ch].voiceType;
   }
 
   on(fn: Listener): () => void {
@@ -390,7 +404,8 @@ export class BurstEngine {
         ? total * intervalSec
         : intervalSec;
     }
-    this.voices[ch].triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv, this.channels[ch].harmEnv);
+    const voice = this.channels[ch].voiceType === 'fm' ? this.fmVoices[ch] : this.jfVoices[ch];
+    voice.triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv, this.channels[ch].harmEnv);
     this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
   }
 }
