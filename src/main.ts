@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 import { BurstEngine } from './burst';
 import { JFVoice, defaultJFVoiceParams } from './jf-voice';
 import { FMVoice, defaultVoiceParams } from './voice';
+import { MangroveVoice, defaultMangroveVoiceParams } from './mangrove-voice';
 import { Grid } from './grid';
 import { GridController } from './grid-controller';
 import { Repl } from './repl';
@@ -71,7 +72,8 @@ startBtn.addEventListener('click', async () => {
 
   const jfVoices = Array.from({ length: 6 }, () => new JFVoice(out, { ...defaultJFVoiceParams }));
   const fmVoices = Array.from({ length: 6 }, () => new FMVoice(out, { ...defaultVoiceParams }));
-  const engine = new BurstEngine(jfVoices, fmVoices);
+  const mgVoices = Array.from({ length: 6 }, () => new MangroveVoice(out, { ...defaultMangroveVoiceParams }));
+  const engine = new BurstEngine(jfVoices, fmVoices, mgVoices);
   for (let i = 1; i <= 6; i++) engine.randomize(i);
   for (let i = 0; i < 6; i++) engine.channels[i].noteB = sequins([i * 3]);
   const grid = new Grid(document.getElementById('grid')!);
@@ -200,7 +202,7 @@ startBtn.addEventListener('click', async () => {
   const repl = new Repl(
     document.getElementById('repl-editor')!,
     document.getElementById('repl-output')!,
-    'launch(1, 8, 4, s([0,4,7]))',
+    'launch(1, s([8,6]), s([3,2]), s([0,4,7]))',
   );
   document.getElementById('repl-run')!
     .addEventListener('click', () => repl.run());

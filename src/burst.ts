@@ -52,7 +52,7 @@ export interface ChannelState {
   // Playback rate multiplier: 0.25=25%, 0.5=50%, 1=100%, 2=200%, 4=400%.
   rate: number;
   // Active voice engine for this channel.
-  voiceType: 'fm' | 'jf';
+  voiceType: 'fm' | 'jf' | 'mg';
 }
 
 type LaunchVal = number | Sequins<number> | SumLayers<number>;
@@ -150,25 +150,27 @@ export class BurstEngine {
   scale: readonly number[] = scales.major;
   private jfVoices: Voice[];
   private fmVoices: Voice[];
+  private mgVoices: Voice[];
   private tokens: number[] = new Array(NUM_CHANNELS).fill(0);
   private running: boolean[] = new Array(NUM_CHANNELS).fill(false);
   private listeners = new Set<Listener>();
 
-  constructor(jfVoices: Voice[], fmVoices: Voice[]) {
-    if (jfVoices.length !== NUM_CHANNELS || fmVoices.length !== NUM_CHANNELS) {
+  constructor(jfVoices: Voice[], fmVoices: Voice[], mgVoices: Voice[]) {
+    if (jfVoices.length !== NUM_CHANNELS || fmVoices.length !== NUM_CHANNELS || mgVoices.length !== NUM_CHANNELS) {
       throw new Error(`expected ${NUM_CHANNELS} voices per engine`);
     }
     this.jfVoices = jfVoices;
     this.fmVoices = fmVoices;
+    this.mgVoices = mgVoices;
     this.channels = Array.from({ length: NUM_CHANNELS }, defaultChannel);
   }
 
   toggleVoice(ch: number): void {
     const c = this.channels[ch];
-    c.voiceType = c.voiceType === 'jf' ? 'fm' : 'jf';
+    c.voiceType = c.voiceType === 'fm' ? 'jf' : c.voiceType === 'jf' ? 'mg' : 'fm';
   }
 
-  getVoiceType(ch: number): 'fm' | 'jf' {
+  getVoiceType(ch: number): 'fm' | 'jf' | 'mg' {
     return this.channels[ch].voiceType;
   }
 
@@ -404,7 +406,8 @@ export class BurstEngine {
         ? total * intervalSec
         : intervalSec;
     }
-    const voice = this.channels[ch].voiceType === 'fm' ? this.fmVoices[ch] : this.jfVoices[ch];
+    const vt = this.channels[ch].voiceType;
+    const voice = vt === 'fm' ? this.fmVoices[ch] : vt === 'jf' ? this.jfVoices[ch] : this.mgVoices[ch];
     voice.triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv, this.channels[ch].harmEnv);
     this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
   }

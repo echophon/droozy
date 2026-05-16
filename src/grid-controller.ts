@@ -654,7 +654,8 @@ export class GridController {
       if (this.actionMode === 'lock') {
         b = this.engine.channels[x].locked ? 15 : 4;
       } else if (this.actionMode === 'voice') {
-        b = this.engine.getVoiceType(x) === 'jf' ? 15 : 6;
+        const vt = this.engine.getVoiceType(x);
+        b = vt === 'mg' ? 15 : vt === 'jf' ? 10 : 4;
       } else {
         b = 10;
       }
@@ -961,7 +962,7 @@ export class GridController {
     }
     if (this.actionMode === 'voice') {
       const states = this.engine.channels.map((c, i) => `ch${i + 1}:${c.voiceType.toUpperCase()}`).join(' ');
-      this.statusEl.textContent = `VOICE — bright=JF · dim=FM · tap a channel to toggle · ${states} — tap VOICE again to exit`;
+      this.statusEl.textContent = `VOICE — bright=MG · med=JF · dim=FM · tap a channel to cycle · ${states} — tap VOICE again to exit`;
       return;
     }
     if (this.actionMode === 'lock') {
