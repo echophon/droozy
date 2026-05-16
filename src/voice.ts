@@ -1,14 +1,5 @@
 import * as Tone from 'tone';
 
-// Percussive FM voice. The burst engine will call triggerAt(when, freq, level)
-// once per event; voices need to be polyphonic (overlap allowed) so that fast
-// bursts ring out naturally rather than choking each other.
-//
-// The current implementation is a deliberately minimal stub: ONE oscillator,
-// ONE modulator, ONE active voice per channel. It will play, but new triggers
-// hard-cut whatever is ringing. THIS IS WHERE YOU TAKE OVER — see the
-// learning-mode contribution section in the plan, and the TODOs below.
-
 export interface VoiceParams {
   /** carrier:modulator frequency ratio. 1 = same pitch, 2 = octave up, etc. */
   harmonicity: number;
@@ -30,75 +21,56 @@ export const defaultVoiceParams: VoiceParams = {
   curve: 'exponential',
 };
 
+interface PoolVoice {
+  carrier: Tone.Oscillator;
+  modulator: Tone.Oscillator;
+  modGain: Tone.Gain;
+  ampEnv: Tone.AmplitudeEnvelope;
+}
+
 export class FMVoice {
   private params: VoiceParams;
   private out: Tone.Gain;
 
-  // === Stub voice: single carrier + modulator, monophonic ======================
-  // TODO (learning): replace with a voice POOL. Decisions to make:
-  //   - pool size (4? 8? 16?)
-  //   - voice-stealing strategy (oldest? quietest? round-robin?)
-  //   - one Tone.Gain per voice for independent amp envelopes
-  //   - one Tone.Oscillator for the modulator per voice (so two simultaneous
-  //     notes don't share the same FM modulator and beat against each other)
-  private carrier: Tone.Oscillator;
-  private modulator: Tone.Oscillator;
-  private modGain: Tone.Gain;     // scales modulator output (Hz units) into carrier.frequency
-  private ampEnv: Tone.AmplitudeEnvelope;
+  private static readonly POOL_SIZE = 8;
+  private pool: PoolVoice[];
+  private poolIndex = 0;
 
   constructor(destination: Tone.InputNode, params: VoiceParams = defaultVoiceParams) {
     this.params = { ...params };
     this.out = new Tone.Gain(1).connect(destination);
 
-    this.ampEnv = new Tone.AmplitudeEnvelope({
-      attack: 0.001,
-      decay: this.params.ampDecay,
-      sustain: 0,
-      release: 0.01,
-      attackCurve: this.params.curve,
-      decayCurve: this.params.curve,
-    }).connect(this.out);
+    this.pool = Array.from({ length: FMVoice.POOL_SIZE }, () => {
+      const ampEnv = new Tone.AmplitudeEnvelope({
+        attack: 0.001,
+        decay: this.params.ampDecay,
+        sustain: 0,
+        release: 0.01,
+        attackCurve: this.params.curve,
+        decayCurve: this.params.curve,
+      }).connect(this.out);
 
-    this.carrier = new Tone.Oscillator({ type: 'sine', frequency: 220 }).start();
-    this.carrier.connect(this.ampEnv);
+      const carrier = new Tone.Oscillator({ type: 'sine', frequency: 220 }).start();
+      carrier.connect(ampEnv);
 
-    this.modulator = new Tone.Oscillator({ type: 'sine', frequency: 440 }).start();
-    this.modGain = new Tone.Gain(0);
-    this.modulator.connect(this.modGain);
-    this.modGain.connect(this.carrier.frequency);
+      const modulator = new Tone.Oscillator({ type: 'sine', frequency: 440 }).start();
+      const modGain = new Tone.Gain(0);
+      modulator.connect(modGain);
+      modGain.connect(carrier.frequency);
+
+      return { carrier, modulator, modGain, ampEnv };
+    });
   }
 
-  /**
-   * Trigger one percussive FM hit. `when` is an absolute audio time from
-   * Tone.now(). `freq` is the carrier in Hz. `level` is 0..1.
-   *
-   * TODO (learning): how should `level` shape the timbre?
-   *   Option A: amp only        — louder hits, same brightness
-   *   Option B: mod-index only  — same loudness, brighter on accents
-   *   Option C: both            — accents are louder AND brighter (current)
-   *   Option D: + pitch sweep   — high level → short downward pitch glide on
-   *                                the carrier (drum-like "thump")
-   *
-   * Also TODO: pick a voice from the pool here, instead of retriggering the
-   * single shared carrier/modulator. As written, fast bursts will choke.
-   */
   private static readonly PITCH_SWEEP_START = [1, 4, 2, 1.5] as const;
   private static readonly PITCH_SWEEP_TIME  = [0, 0.03, 0.12, 0.35] as const;
-  // Modulator-start multipliers (relative to target mod freq) and durations.
   private static readonly HARM_SWEEP_START  = [1, 2, 1.5, 1.25] as const;
   private static readonly HARM_SWEEP_TIME   = [0, 0.05, 0.15, 0.40] as const;
 
   triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, pitchEnv?: number, harmEnv?: number): void {
     const lv = Math.max(0, Math.min(1, level));
-    // Per-trigger harmonicity overrides the voice default; the burst engine
-    // sequences this per-step so each note can have its own timbral character.
     const harm = harmonicity ?? this.params.harmonicity;
 
-    // env (0..1) shapes the envelope from snappy → longer-but-still-percussive.
-    // 0 reproduces the voice's static defaults exactly (matching legacy calls
-    // that pass no env). 1 caps at "long perc" — never a sustained pad.
-    // decaySec bypasses the 0..1 range entirely and sets ampDec directly in
-    // wall-clock seconds (burst-timed and hit-timed env modes).
     let attackTime: number;
     let ampDec: number;
     let modDec: number;
@@ -108,16 +80,20 @@ export class FMVoice {
       modDec = ampDec * 0.4;
     } else if (env !== undefined) {
       const e = Math.max(0, Math.min(1, env));
-      attackTime = 0.001 + e * 0.024;     // 1ms → 25ms
-      ampDec = 0.4 + e * 0.8;              // 0.4s → 1.2s
-      modDec = 0.05 + e * 0.25;            // 0.05s → 0.3s
+      attackTime = 0.001 + e * 0.024;
+      ampDec = 0.4 + e * 0.8;
+      modDec = 0.05 + e * 0.25;
     } else {
       attackTime = 0.001;
       ampDec = this.params.ampDecay;
       modDec = this.params.modDecay;
     }
-    this.ampEnv.attack = attackTime;
-    this.ampEnv.decay = ampDec;
+
+    const voice = this.pool[this.poolIndex];
+    this.poolIndex = (this.poolIndex + 1) % FMVoice.POOL_SIZE;
+
+    voice.ampEnv.attack = attackTime;
+    voice.ampEnv.decay = ampDec;
 
     const pEnv = pitchEnv ?? 0;
     const hEnv = harmEnv ?? 0;
@@ -128,39 +104,37 @@ export class FMVoice {
     const modEnd    = freq * harm;
 
     if (pEnv > 0) {
-      this.carrier.frequency.cancelScheduledValues(when);
-      this.carrier.frequency.setValueAtTime(freq * pitchMult, when);
-      this.carrier.frequency.exponentialRampToValueAtTime(freq, when + pitchTime);
+      voice.carrier.frequency.cancelScheduledValues(when);
+      voice.carrier.frequency.setValueAtTime(freq * pitchMult, when);
+      voice.carrier.frequency.exponentialRampToValueAtTime(freq, when + pitchTime);
     } else {
-      this.carrier.frequency.setValueAtTime(freq, when);
+      voice.carrier.frequency.setValueAtTime(freq, when);
     }
     const modStart = freq * pitchMult * harm * harmMult;
     if (modStart !== modEnd) {
-      this.modulator.frequency.cancelScheduledValues(when);
-      this.modulator.frequency.setValueAtTime(modStart, when);
-      this.modulator.frequency.exponentialRampToValueAtTime(modEnd, when + Math.max(pitchTime, harmTime));
+      voice.modulator.frequency.cancelScheduledValues(when);
+      voice.modulator.frequency.setValueAtTime(modStart, when);
+      voice.modulator.frequency.exponentialRampToValueAtTime(modEnd, when + Math.max(pitchTime, harmTime));
     } else {
-      this.modulator.frequency.setValueAtTime(modEnd, when);
+      voice.modulator.frequency.setValueAtTime(modEnd, when);
     }
 
-    // Schedule mod-depth envelope directly in Hz (envelope nodes are 0..1; we
-    // need real Hz here). Snappy attack, then exponential decay to near-zero.
     const peakMod = freq * this.params.modIndex * lv;
     const floor = Math.max(peakMod * 0.001, 0.0001);
-    this.modGain.gain.cancelScheduledValues(when);
-    this.modGain.gain.setValueAtTime(floor, when);
-    this.modGain.gain.linearRampToValueAtTime(peakMod, when + 0.001);
-    this.modGain.gain.exponentialRampToValueAtTime(floor, when + modDec);
+    voice.modGain.gain.cancelScheduledValues(when);
+    voice.modGain.gain.setValueAtTime(floor, when);
+    voice.modGain.gain.linearRampToValueAtTime(peakMod, when + 0.001);
+    voice.modGain.gain.exponentialRampToValueAtTime(floor, when + modDec);
 
-    // Total duration = attack + decay so the release phase doesn't truncate
-    // the natural decay tail.
-    this.ampEnv.triggerAttackRelease(ampDec + attackTime, when, lv);
+    voice.ampEnv.triggerAttackRelease(ampDec + attackTime, when, lv);
   }
 
   setParams(p: Partial<VoiceParams>): void {
     Object.assign(this.params, p);
-    this.ampEnv.decay = this.params.ampDecay;
-    this.ampEnv.attackCurve = this.params.curve;
-    this.ampEnv.decayCurve = this.params.curve;
+    for (const voice of this.pool) {
+      voice.ampEnv.decay = this.params.ampDecay;
+      voice.ampEnv.attackCurve = this.params.curve;
+      voice.ampEnv.decayCurve = this.params.curve;
+    }
   }
 }
