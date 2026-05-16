@@ -47,6 +47,10 @@ export interface ChannelState {
   // When true, all A-layer parameters are kept at the same sequence length.
   // Extends or truncates sibling params whenever one param's length changes.
   locked: boolean;
+  // Auto-reset interval in bars for this channel (0=off, 1–8=bars per cycle).
+  resetInterval: number;
+  // Playback rate multiplier: 0.25=25%, 0.5=50%, 1=100%, 2=200%, 4=400%.
+  rate: number;
 }
 
 type LaunchVal = number | Sequins<number> | SumLayers<number>;
@@ -88,6 +92,8 @@ function defaultChannel(): ChannelState {
     pitchEnv: 0,
     harmEnv: 0,
     locked: true,
+    resetInterval: 0,
+    rate: 1,
   };
 }
 
@@ -139,9 +145,6 @@ export class BurstEngine {
   // Global scale shared across all channels. Direct mutation is fine; call
   // controller.refresh() (or the REPL's `refresh()`) to update the grid.
   scale: readonly number[] = scales.major;
-  // Auto-reset interval in bars (0=off, 1/2/4/8=bars per cycle).
-  resetInterval = 0;
-
   private voices: FMVoice[];
   private tokens: number[] = new Array(NUM_CHANNELS).fill(0);
   private running: boolean[] = new Array(NUM_CHANNELS).fill(false);
@@ -168,15 +171,18 @@ export class BurstEngine {
     return this.running.slice();
   }
 
+  resetChannel(ch: number): void {
+    const c = this.channels[ch];
+    c.div.reset();   c.divB.reset();
+    c.reps.reset();  c.repsB.reset();
+    c.note.reset();  c.noteB.reset();
+    c.level.reset(); c.levelB.reset();
+    c.harm.reset();  c.harmB.reset();
+    c.env.reset();   c.envB.reset();
+  }
+
   resetSequins(): void {
-    for (const ch of this.channels) {
-      ch.div.reset();   ch.divB.reset();
-      ch.reps.reset();  ch.repsB.reset();
-      ch.note.reset();  ch.noteB.reset();
-      ch.level.reset(); ch.levelB.reset();
-      ch.harm.reset();  ch.harmB.reset();
-      ch.env.reset();   ch.envB.reset();
-    }
+    for (let i = 0; i < NUM_CHANNELS; i++) this.resetChannel(i);
   }
 
   // Lua launch(): patch the channel state, cancel any in-flight coroutine
@@ -337,7 +343,7 @@ export class BurstEngine {
       // Burst-mode probability gate — skip the whole burst. Only applies when
       // not in per-hit mode; infinite bursts are unaffected either way.
       if (!cfg.probHit && reps !== -1 && Math.random() > cfg.burstProb) {
-        target += reps * (4 / div);
+        target += reps * (4 / div) / cfg.rate;
         await waitUntilBeat(target, this.quantize);
         if (this.tokens[ch] !== token) return null;
         return { reps, div, target };
@@ -360,7 +366,7 @@ export class BurstEngine {
         } else {
           this.fire(ch, target, freq, level, harm, env, div, total, i);
         }
-        target += 4 / div;
+        target += 4 / div / cfg.rate;
       }
 
       if (this.tokens[ch] !== token) return null;

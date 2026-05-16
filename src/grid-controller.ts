@@ -6,27 +6,28 @@ import { scales, ScaleName } from './scales';
 // Layout reference:
 //   rows 0..5 = per-channel step view: cols 0..7 = A layer · cols 8..15 = B layer
 //   row 6     = 0..5 launch · 6..11 dark · 12 KB · 13 PROB · 14 QNT · 15 SND
-//   row 7     = 0..5 param (div/reps/note/level/harm/env) · 6 scale · 7-8 dark
-//             · 9 CLR · 10-13 dark · 14 RANDOMIZE · 15 MUTATE
+//   row 7     = 0..5 param (div/reps/note/level/harm/env) · 6-11 dark
+//             · 12 CLR · 13 LOCK · 14 RANDOMIZE · 15 MUTATE
 //
 // Display modes (row 6 right side — latch, mutually exclusive):
+//   RST (col 11): rows 0-5 each show reset interval (cols 0-8) · rate selector (cols 11-15: 25/50/100/200/400%)
 //   PROB (col 13): rows 0-5 each show a probability slider for that channel
 //     cols 0..14 = burst probability 0-100% · col 15 = burst/hit toggle
 //   QNT (col 14): opens the scale+quantize picker (same as row 7 col 6)
 //   SND (col 15): rows 0-5 each show env (0-2) · geode (4-7) · pitch env (8-11) · harm env (12-15) per channel
 //
 // Row 7 action modes (momentary — arm, then tap a channel in row 6):
-//   CLR (col 9):        clear selected param (A+B) for a channel → tap row 6 to pick
-//   LOCK (col 10):      toggle locked mode per channel (persistent — stays armed for multi-channel)
+//   CLR (col 12):       clear selected param (A+B) for a channel → tap row 6 to pick
+//   LOCK (col 13):      toggle locked mode per channel (persistent — stays armed for multi-channel)
 //   RANDOMIZE (col 14): replace A-layer with fresh random values
 //   MUTATE (col 15):    nudge existing A-layer values
 //
 // KEYBOARD MODE (row 6 col 12) — gestural sequence programming
 //   Page 1: rows 0..1 = note · rows 2..3 = div · rows 4..5 = reps (32 values each)
 //   Page 2: rows 0..1 = level · rows 2..3 = harm · rows 4..5 = env (32 values each)
-//   Row 6:  cols 0..7 = scale select · cols 8..15 = dark
+//   Row 6:  cols 0..7 = scale select · col 12 = commit/exit (fast-strobes) · rest dark
 //   Row 7:  cols 0..5 = channel select (tap again = toggle A/B · slow-strobes on B)
-//           col 12 = commit/exit (fast-strobes) · col 13 = page toggle · col 14 = clear buffers
+//           col 13 = page toggle · col 14 = clear buffers
 //
 // PICKERS (rows 0..1, momentary):
 //   step picker  — tap a step on rows 0..5
@@ -37,9 +38,8 @@ type ParamName = 'div' | 'reps' | 'note' | 'level' | 'harm' | 'env';
 const PARAMS: ParamName[] = ['div', 'reps', 'note', 'level', 'harm', 'env'];
 
 // Row 7 buttons
-const SCALE_BUTTON_COL     = 6;
-const CLR_BUTTON_COL       = 9;   // clear selected param on a channel
-const LOCK_BUTTON_COL      = 10;  // toggle locked (equal-length) mode per channel
+const CLR_BUTTON_COL       = 12;  // clear selected param on a channel
+const LOCK_BUTTON_COL      = 13;  // toggle locked (equal-length) mode per channel
 const RANDOMIZE_BUTTON_COL = 14;
 const MUTATE_BUTTON_COL    = 15;
 
@@ -69,9 +69,12 @@ const SCALE_NAMES: readonly ScaleName[] = [
 // Quantize: 1-16 events per whole note, one value per grid column.
 const QUANTIZE_VALUES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
-// Reset page: col position = bar count (0=off, 1=1bar, 2=2bars, 4=4bars, 8=8bars).
-const RESET_INTERVALS: readonly number[] = [0, 1, 2, 4, 8];
-const RESET_COLS:      readonly number[] = [0, 1, 2, 4, 8];
+// Reset page: col = bar count (0=off, 1–8=bars per cycle). col 0 = off.
+const RESET_INTERVALS: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const RESET_COLS:      readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+// Reset page cols 11–15: per-channel rate (25%/50%/100%/200%/400%).
+const RATE_VALUES: readonly number[] = [0.25, 0.5, 1, 2, 4];
+const RATE_COLS:   readonly number[] = [11, 12, 13, 14, 15];
 
 const ENV_MODE_NAMES:        readonly string[] = ['shape', 'burst', 'hit'];
 const GEODE_MODE_NAMES:      readonly string[] = ['off', 'transient', 'sustain', 'cycle'];
@@ -103,9 +106,9 @@ const STEP_PICKER_VALUES: Record<ParamName, number[]> = {
   reps: [...Array.from({ length: 31 }, (_, i) => i + 1), -1],
   note:  Array.from({ length: 32 }, (_, i) => i),
   level: Array.from({ length: 32 }, (_, i) => (i + 1) / 32),
-  // 32 evenly-spaced ratios from 2.0..4.0 inclusive (step ≈ 0.0645).
-  // Index 0 = 2 (default), index 31 = 4 (max inharmonic).
-  harm:  Array.from({ length: 32 }, (_, i) => 2 + (i / 31) * 16),
+  // 32 values from 2.0..25.25 in steps of 0.75.
+  // Index 0 = 2 (default harmonic), index 31 = 25.25 (most inharmonic).
+  harm:  Array.from({ length: 32 }, (_, i) => 2 + i * 0.75),
   // 32 evenly-spaced env shape values 0..1. 0 = snappy default, 1 = longest
   // still-percussive setting (~25ms attack, ~1.2s decay).
   env:   Array.from({ length: 32 }, (_, i) => i / 31),
@@ -118,9 +121,7 @@ function valueBrightness(param: ParamName, value: number): number {
     case 'note':  return Math.min(4 + Math.abs(value), 15);
     case 'level': return Math.max(2, Math.round(2 + value * 13));
     case 'harm': {
-      // Brighter for more inharmonic ratios (further from 2). Clamped so
-      // off-range values (set via REPL) still render visibly.
-      const norm = (value - 2) / 2;        // 0..1 across 2..4
+      const norm = (value - 2) / 23.25;    // 0..1 across 2..25.25
       return Math.max(4, Math.min(14, Math.round(4 + norm * 10)));
     }
     case 'env': {
@@ -200,12 +201,20 @@ export class GridController {
   private handleNormalPress(x: number, y: number): void {
     if (y < 6) {
       if (this.resetMode) {
+        const rateIdx = RATE_COLS.indexOf(x);
+        if (rateIdx !== -1) {
+          this.engine.channels[y].rate = RATE_VALUES[rateIdx];
+          const pct = Math.round(RATE_VALUES[rateIdx] * 100);
+          console.log(`[rate] ch${y + 1} ${pct}%`);
+          this.renderChannelRow(y);
+          return;
+        }
         const idx = RESET_COLS.indexOf(x);
         if (idx !== -1) {
-          this.engine.resetInterval = RESET_INTERVALS[idx];
+          this.engine.channels[y].resetInterval = RESET_INTERVALS[idx];
           const label = RESET_INTERVALS[idx] === 0 ? 'off' : `${RESET_INTERVALS[idx]} bar`;
-          console.log(`[reset] ${label}`);
-          for (let ch = 0; ch < NUM_CHANNELS; ch++) this.renderChannelRow(ch);
+          console.log(`[reset] ch${y + 1} ${label}`);
+          this.renderChannelRow(y);
         }
         return;
       }
@@ -266,7 +275,7 @@ export class GridController {
       return;
     }
 
-    if (y === 7 && p.kind === 'scale' && x === SCALE_BUTTON_COL) {
+    if (y === 6 && p.kind === 'scale' && x === ROW6_QNT_COL) {
       this.closePicker();
       return;
     }
@@ -433,12 +442,6 @@ export class GridController {
       this.renderAll(); this.updateStatus(); return;
     }
 
-    if (this.actionMode === 'clear' && x === CLR_BUTTON_COL) {
-      for (let i = 0; i < NUM_CHANNELS; i++) this.clearChannelParam(i);
-      this.actionMode = null;
-      this.renderAll(); this.updateStatus(); return;
-    }
-
     if (this.actionMode === 'lock' && x < 6) {
       const c = this.engine.channels[x];
       c.locked = !c.locked;
@@ -458,7 +461,6 @@ export class GridController {
       } else if (this.actionMode === 'clear') {
         this.clearChannelParam(x);
       }
-      this.actionMode = null;
       this.renderAll(); this.updateStatus(); return;
     }
 
@@ -481,8 +483,6 @@ export class GridController {
       this.picker = null;
       this.renderAll();
       this.updateStatus();
-    } else if (x === SCALE_BUTTON_COL) {
-      this.openScalePicker();
     } else if (x === CLR_BUTTON_COL) {
       this.actionMode = this.actionMode === 'clear' ? null : 'clear';
       if (this.actionMode) { this.probMode = false; this.resetMode = false; this.soundMode = false; }
@@ -504,7 +504,7 @@ export class GridController {
       this.renderAll();
       this.updateStatus();
     }
-    // cols 7-8 and 10-13 are dark/unhandled
+    // cols 6-11 are dark/unhandled
   }
 
   // ---- rendering ---------------------------------------------------------
@@ -610,13 +610,16 @@ export class GridController {
   }
 
   private renderResetRow(ch: number): void {
-    const cur = this.engine.resetInterval;
+    const { resetInterval, rate } = this.engine.channels[ch];
     for (let x = 0; x < GRID_W; x++) {
       this.grid.setLed(x, ch, 0);
       this.grid.setStrobe(x, ch, 'off');
     }
     for (let i = 0; i < RESET_INTERVALS.length; i++) {
-      this.grid.setLed(RESET_COLS[i], ch, RESET_INTERVALS[i] === cur ? 15 : 3);
+      this.grid.setLed(RESET_COLS[i], ch, RESET_INTERVALS[i] === resetInterval ? 15 : 3);
+    }
+    for (let i = 0; i < RATE_VALUES.length; i++) {
+      this.grid.setLed(RATE_COLS[i], ch, RATE_VALUES[i] === rate ? 15 : 3);
     }
   }
 
@@ -641,11 +644,6 @@ export class GridController {
       this.grid.setLed(x, 6, b);
     }
     for (let x = 6; x < 12; x++) this.grid.setLed(x, 6, 0);
-    // Clear-all: col 9 (above CLR in row 7) lights up when CLR is armed
-    if (this.actionMode === 'clear') {
-      this.grid.setLed(CLR_BUTTON_COL, 6, 15);
-      this.grid.setStrobe(CLR_BUTTON_COL, 6, 'fast');
-    }
     // Keep mode buttons visible at mid brightness during action mode
     this.grid.setLed(ROW6_RST_COL,  6, 8);
     this.grid.setLed(ROW6_KB_COL,   6, 8);
@@ -681,20 +679,13 @@ export class GridController {
       this.grid.setLed(x, 7, isSelected ? 15 : 5);
       this.grid.setStrobe(x, 7, isSelected && this.paramLayer === 'B' ? 'slow' : 'off');
     }
-    // Scale picker
-    this.grid.setLed(SCALE_BUTTON_COL, 7, this.picker?.kind === 'scale' ? 15 : 8);
-    // Dark gaps at 7, 8
-    this.grid.setLed(7, 7, 0);
-    this.grid.setLed(8, 7, 0);
-    // Clear (arms pick-a-channel mode)
+    // Dark gaps at 6-11
+    for (let x = 6; x < 12; x++) this.grid.setLed(x, 7, 0);
+    // Clear · Lock · Randomize · Mutate
     this.grid.setLed(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 15 : 4);
     this.grid.setStrobe(CLR_BUTTON_COL, 7, this.actionMode === 'clear' ? 'fast' : 'off');
-    // Lock (toggle per-channel locked mode)
     this.grid.setLed(LOCK_BUTTON_COL, 7, this.actionMode === 'lock' ? 15 : 4);
     this.grid.setStrobe(LOCK_BUTTON_COL, 7, this.actionMode === 'lock' ? 'fast' : 'off');
-    // Dark gaps at 11-13
-    for (let x = 11; x < 14; x++) this.grid.setLed(x, 7, 0);
-    // Randomize and Mutate
     this.grid.setLed(RANDOMIZE_BUTTON_COL, 7, this.actionMode === 'randomize' ? 15 : 4);
     this.grid.setStrobe(RANDOMIZE_BUTTON_COL, 7, this.actionMode === 'randomize' ? 'fast' : 'off');
     this.grid.setLed(MUTATE_BUTTON_COL, 7, this.actionMode === 'mutate' ? 15 : 4);
@@ -767,7 +758,6 @@ export class GridController {
         }
         return;
       }
-      if (x === KB_EXIT_COL)  { this.exitKbMode(); return; }
       if (x === KB_PAGE_BUTTON_COL)  {
         this.kbPage = this.kbPage === 1 ? 2 : 1;
         this.renderAll();
@@ -779,6 +769,7 @@ export class GridController {
     }
 
     if (y === 6) {
+      if (x === KB_EXIT_COL) { this.exitKbMode(); return; }
       const name = KB_SCALE_NAMES[x];
       if (name) { this.engine.scale = scales[name]; console.log(`[kb scale] ${name}`); }
       this.renderAll();
@@ -898,6 +889,8 @@ export class GridController {
       this.grid.setLed(x, 6, scales[name] === activeScale ? 15 : 8);
     }
     for (let x = 8; x < GRID_W; x++) this.grid.setLed(x, 6, 0);
+    this.grid.setLed(KB_EXIT_COL, 6, 15);
+    this.grid.setStrobe(KB_EXIT_COL, 6, 'fast');
   }
 
   private renderKbRow7(): void {
@@ -906,9 +899,7 @@ export class GridController {
       this.grid.setLed(x, 7, isSelected ? 15 : 4);
       this.grid.setStrobe(x, 7, isSelected && this.kbBLayer ? 'slow' : 'off');
     }
-    for (let x = 6; x < 12; x++) this.grid.setLed(x, 7, 0);
-    this.grid.setLed(KB_EXIT_COL,   7, 15);
-    this.grid.setStrobe(KB_EXIT_COL, 7, 'fast');
+    for (let x = 6; x < GRID_W; x++) this.grid.setLed(x, 7, 0);
     this.grid.setLed(KB_PAGE_BUTTON_COL,   7, this.kbPage === 1 ? 15 : 8);
     this.grid.setLed(KB_CLEAR_BUTTON_COL,  7, 4);
     for (let x = 15; x < GRID_W; x++) this.grid.setLed(x, 7, 0);
@@ -931,9 +922,9 @@ export class GridController {
       return;
     }
     if (this.resetMode) {
-      const cur = this.engine.resetInterval;
-      const label = cur === 0 ? 'off' : `every ${cur} bar`;
-      this.statusEl.textContent = `RESET — col 0: off · col 1: 1 bar · col 2: 2 bars · col 4: 4 bars · col 8: 8 bars · current: ${label}`;
+      const perCh = this.engine.channels.map((c, i) =>
+        `ch${i + 1}:${c.resetInterval === 0 ? 'off' : `${c.resetInterval}b`}`).join(' ');
+      this.statusEl.textContent = `RESET — tap row to set: col 0=off · cols 1-8=bars · ${perCh}`;
       return;
     }
     if (this.probMode) {
@@ -956,7 +947,7 @@ export class GridController {
     }
     if (this.actionMode) {
       const desc = this.actionMode === 'clear'
-        ? `CLEAR ${this.selectedParam} — tap channel (0-5) or col 9 = all channels`
+        ? `CLEAR ${this.selectedParam} — tap a channel`
         : `${this.actionMode.toUpperCase()} — tap a channel`;
       this.statusEl.textContent = `${desc} · tap button again to cancel`;
       return;

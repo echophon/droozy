@@ -13,11 +13,6 @@ const bpmInput = document.getElementById('bpm') as HTMLInputElement;
 const muteAudio = document.getElementById('mute-audio') as HTMLInputElement;
 const playStopBtn = document.getElementById('play-stop') as HTMLButtonElement;
 const status = document.getElementById('status')!;
-const mainEl = document.getElementById('main')!;
-
-document.getElementById('debug-toggle')!.addEventListener('click', () => {
-  mainEl.classList.toggle('debug');
-});
 
 let booted = false;
 
@@ -29,7 +24,7 @@ startBtn.addEventListener('click', async () => {
 
   await Tone.start();
   const transport = Tone.getTransport();
-  transport.bpm.value = Number(bpmInput.value) || 120;
+  transport.bpm.value = Number(bpmInput.value) || 130;
   transport.start();
 
   bpmInput.addEventListener('input', () => {
@@ -83,14 +78,19 @@ startBtn.addEventListener('click', async () => {
   const grid = new Grid(document.getElementById('grid')!);
   const controller = new GridController(engine, grid);
 
-  // Periodic global sequin reset — fires every bar, resets every N bars.
-  let barCount = 0;
+  // Per-channel sequin reset — fires every bar, each channel resets on its own interval.
+  const barCounts = new Array(6).fill(0) as number[];
   Tone.getTransport().scheduleRepeat(() => {
-    if (engine.resetInterval <= 0) return;
-    if (++barCount % engine.resetInterval === 0) {
-      engine.resetSequins();
-      controller.refresh();
+    let didReset = false;
+    for (let i = 0; i < 6; i++) {
+      const interval = engine.channels[i].resetInterval;
+      if (interval <= 0) continue;
+      if (++barCounts[i] % interval === 0) {
+        engine.resetChannel(i);
+        didReset = true;
+      }
     }
+    if (didReset) controller.refresh();
   }, '1m');
 
   const midiSelect = document.getElementById('midi-out') as HTMLSelectElement;
@@ -114,7 +114,7 @@ startBtn.addEventListener('click', async () => {
   // Play / stop — resets all sequins to position 0 and relaunches running
   // channels. Sends MIDI Start/Stop and drives a 24-PPQN clock stream.
   // Tone.js Transport default PPQ = 192, so "8i" = 192/24 = 1 MIDI clock pulse.
-  let transportPlaying = false;
+  let transportPlaying = true;
   let lastRunning = new Array(6).fill(false) as boolean[];
   let clockEventId = -1;
 
@@ -176,9 +176,9 @@ startBtn.addEventListener('click', async () => {
   // Call refresh() after direct state writes that don't go through launch()
   // (e.g. `engine.quantize = 8` or `engine.scale = scales.minor`).
   w.refresh = () => controller.refresh();
-  // geodeMode(n, ch?) — set geode mode (0=off 1=transient 2=sustain 3=cycle).
+  // geodeMode(n, ch?) — set geode mode (0=sustain 1=transient 2=cycle).
   // Omit ch to set all channels; ch is 1-indexed.
-  w.geodeMode = (mode: 0 | 1 | 2 | 3, ch?: number) => {
+  w.geodeMode = (mode: 0 | 1 | 2, ch?: number) => {
     if (ch !== undefined) {
       if (ch >= 1 && ch <= 6) engine.channels[ch - 1].geodeMode = mode;
     } else {
@@ -213,5 +213,7 @@ startBtn.addEventListener('click', async () => {
 
   engine.launch(1);
   engine.launch(4);
+  midi.sendStart();
+  clockEventId = Tone.getTransport().scheduleRepeat(() => midi.sendClock(), '8i');
   status.textContent = 'running';
 });

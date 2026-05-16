@@ -7,6 +7,7 @@
   --led-sat: 95%;
   --cell-size: 38px;
   --cell-gap: 4px;
+  --grid-width: calc(16 * var(--cell-size) + 15 * var(--cell-gap) + 32px);
 }
 
 * { box-sizing: border-box; }
@@ -22,9 +23,23 @@ html, body {
 header {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  padding: 0.75rem 1.25rem;
   border-bottom: 1px solid #1a1a1d;
+}
+
+.docs-link {
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+}
+
+.docs-link:hover {
+  color: var(--fg);
 }
 
 header h1 {
@@ -69,9 +84,10 @@ header input[type="number"] {
 }
 
 .status {
-  margin-left: auto;
+  text-align: left;
   color: var(--dim);
   font-size: 0.85rem;
+  margin: 0;
 }
 
 main {
@@ -226,7 +242,7 @@ main {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 100%;
+  width: var(--grid-width);
   max-width: 100%;
 }
 
@@ -394,47 +410,14 @@ main {
   font-style: italic;
 }
 
-/* ---------- debug toggle ---------- */
-
-.debug-toggle-btn {
-  font: inherit;
-  font-size: 0.75rem;
-  background: transparent;
-  color: var(--dim);
-  border: 1px solid #2a2a30;
-  border-radius: 3px;
-  padding: 0.25rem 0.6rem;
-  cursor: pointer;
-  letter-spacing: 0.05em;
-  transition: color 100ms, border-color 100ms;
-}
-
-.debug-toggle-btn:hover {
-  color: var(--fg);
-  border-color: #3a3a40;
-}
-
-#main.debug .debug-toggle-btn {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* ---------- debug show/hide ---------- */
 
-/* default: show guide, hide debug elements */
-#main .guide     { display: flex; }
 #main .repl-help { display: none; }
-#main .repl      { display: none; }
-
-/* debug mode: swap guide for repl-help, show repl below */
-#main.debug .guide     { display: none; }
 #main.debug .repl-help { display: block; }
-#main.debug .repl      { display: flex; }
 
 /* ---------- repl-help (debug view) ---------- */
 
 .repl-help {
-  flex: 1;
   font-size: 0.78rem;
   color: var(--dim);
   background: #0d0d10;
@@ -442,6 +425,8 @@ main {
   border-radius: 4px;
   padding: 0.6rem 0.8rem;
   line-height: 1.7;
+  max-width: 680px;
+  margin: 0 auto;
 }
 
 .repl-help h3 {

@@ -8,10 +8,10 @@
   </head>
   <body>
     <header>
-      <h1>potionshop</h1>
+      <h1>potionshop <a href="README.md" target="_blank" class="docs-link">docs</a></h1>
       <label>
         bpm
-        <input id="bpm" type="number" min="30" max="300" step="1" value="120" />
+        <input id="bpm" type="number" min="30" max="300" step="1" value="130" />
       </label>
       <label>
         midi out
@@ -21,94 +21,13 @@
       </label>
       <label>
         <input id="mute-audio" type="checkbox" />
-        mute audio
+        mute
       </label>
-      <button id="play-stop" type="button" disabled>▸ play</button>
-      <button id="debug-toggle" type="button" class="debug-toggle-btn">debug</button>
-      <span class="status" id="status">click the grid overlay to start audio</span>
+      <button id="play-stop" type="button" disabled>■ stop</button>
     </header>
 
-    <main id="main">
+    <main id="main" class="debug">
       <div class="top-row">
-
-        <!-- guide: shown by default, hidden in debug mode -->
-        <div class="guide">
-          <p class="guide-lede">a browser-based FM burst sequencer — six channels each firing rhythmic bursts of repeated FM tones. every parameter follows its own looping sequence, so patterns drift and phase independently.</p>
-
-          <div class="guide-cols">
-            <div class="guide-col">
-              <h4>parameters · row 7, cols 0–5</h4>
-              <dl class="guide-dl">
-                <dt>div</dt><dd>burst divisor 1–32 · smaller = faster</dd>
-                <dt>reps</dt><dd>repetitions per burst · 1–8 or ∞</dd>
-                <dt>note</dt><dd>scale degree · default scale is major</dd>
-                <dt>level</dt><dd>amplitude · 0–1</dd>
-                <dt>harm</dt><dd>FM ratio 2–4 · integers = harmonic · non-integers = metallic</dd>
-                <dt>env</dt><dd>envelope shape · 0 = snappy · 1 = slower decay</dd>
-              </dl>
-              <p class="guide-aside">tap a param button again to toggle A ↔ B layer (B is an additive offset over A · slow-strobes when active)</p>
-
-              <h4>step editing · rows 0–5</h4>
-              <p>left cols 0–7 = A layer · right cols 8–15 = B layer<br>
-              tap a step → value picker appears on rows 0–1<br>
-              tap past the last step → extend the sequence<br>
-              tap a step again inside the picker → delete it</p>
-
-              <h4>actions · row 7, cols 9–15</h4>
-              <dl class="guide-dl">
-                <dt>CLR · 9</dt><dd>arm → tap channel → clear selected param's A+B</dd>
-                <dt>LOCK · 10</dt><dd>arm → tap channels to toggle locked mode — keeps all param lengths equal · on by default</dd>
-                <dt>RND · 14</dt><dd>arm → tap channel → randomize all A-layer params</dd>
-                <dt>MUT · 15</dt><dd>arm → tap channel → nudge A-layer values ±25%</dd>
-              </dl>
-            </div>
-
-            <div class="guide-col">
-              <h4>launch &amp; modes · row 6</h4>
-              <dl class="guide-dl">
-                <dt>0–5</dt><dd>tap to launch or stop each channel · channels snap to the launch grid (default: next quarter note)</dd>
-                <dt>KB · 12</dt><dd>keyboard mode · tap values directly to build sequences gesture by gesture</dd>
-                <dt>PROB · 13</dt><dd>burst probability per channel · cols 0–14 = 0–100% · col 15 = per-burst vs per-hit</dd>
-                <dt>QNT · 14</dt><dd>opens scale + quantize picker · row 0: scale · row 1: 1–16 events per whole note</dd>
-                <dt>SND · 15</dt><dd>envelope timing (shape / burst / hit) + geode amplitude mode (off / transient / sustain / cycle)</dd>
-              </dl>
-
-              <h4>keyboard mode</h4>
-              <p>page 1 · rows 0–1 note · rows 2–3 div · rows 4–5 reps<br>
-              page 2 · rows 0–1 level · rows 2–3 harm · rows 4–5 env<br>
-              row 6: scale selector (8 options) · row 7: channel select<br>
-              col 12 commit+exit · col 13 page toggle · col 14 clear buffers</p>
-
-              <h4>scales + quantize · row 7 col 6 (or QNT)</h4>
-              <p>row 0: chromatic · major · minor · pentatonic · dorian · akebono · hijaz · kurd · bayati · rast · zen · wuSheng<br>
-              row 1: quantize 1–16 events per whole note</p>
-
-              <h4>locked mode</h4>
-              <p>all channels start locked — adding or removing a step on any parameter extends or trims all others to match. arm LOCK (row 7 col 10) and tap a channel to toggle. randomize also respects locked state.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- repl-help: hidden by default, shown in debug mode -->
-        <div class="repl-help">
-          <h3>commands</h3>
-          <code>launch(ch, div?, reps?, note?, level?, harm?, env?)</code> — start or replace channel ch (1..6)<br/>
-          <code>stop(ch)</code> · <code>stopAll()</code> — silence one channel or everything<br/>
-          <code>s([1,2,3])</code> — make a sequins (cycles forever)<br/>
-          <code>scales.major / minor / pentatonic / dorian / chromatic</code><br/>
-          <code>scales.akebono / hijaz / kurd / bayati / rast / zen / wuSheng</code> — eastern + percussion<br/>
-          <code>refresh()</code> — redraw the grid after direct state writes<br/>
-          <h3>direct state</h3>
-          <code>engine.channels[0].note = s([0,4,7])</code> — swap a single param live<br/>
-          <code>setScale(scales.akebono)</code> or <code>engine.scale = scales.akebono; refresh()</code> — set global scale (shared by all channels)<br/>
-          <code>engine.quantize = 16</code> — per-fire snap grid (0 = off · events per whole note)<br/>
-          <code>engine.launchGrid = 4</code> — launch alignment grid (the global clock pulse · 0 = off)<br/>
-          <h3>examples</h3>
-          <code>launch(1, 8, 4, 2)</code><br/>
-          <code>setScale(scales.major); launch(1, s([4,3]), -1, s([0,4,7]), 0.7)</code><br/>
-          <code>launch(1, 8, s([4,3]), s([0,4,7]), s([1,0.5]), s([2,2,7]))</code> — harm sequins at position 6
-        </div>
-
         <section class="grid-wrap">
           <div class="grid-frame">
             <div id="grid" class="grid" aria-label="monome-style 16x8 grid"></div>
@@ -117,15 +36,30 @@
               <p class="start-hint">browsers block audio until a user gesture · this enables web audio for the session</p>
             </div>
           </div>
-          <!-- <div class="grid-legend">
-            <div><span class="row-label">rows 0-5</span> cols 0-7 = A layer · cols 8-15 = B layer · tap step to edit</div>
-            <div><span class="row-label">picker</span> rows 0-1 (momentary) · steps / scales · tap value to set</div>
-            <div><span class="row-label">row 6</span> launch (0-5) · dark (6-11) · KB · PROB · QNT · SND (12-15)</div>
-            <div><span class="row-label">row 7</span> 0-5 param (div · reps · note · level · harm · env) · 6 scale · 9 CLR · 10 LOCK · 14 RND · 15 MUT</div>
-            <div><span class="row-label">display modes</span> PROB: probability per channel · QNT/scale: scale + quantize 1-16 · SND: env (0-2) + geode (4-7)</div>
-          </div> -->
         </section>
       </div>
+
+      <p class="status" id="status">click grid to start audio</p>
+
+      <!-- repl-help: hidden by default, shown in debug mode -->
+      <!-- <div class="repl-help">
+        <h3>commands</h3>
+        <code>launch(ch, div?, reps?, note?, level?, harm?, env?)</code> — start or replace channel ch (1..6)<br/>
+        <code>stop(ch)</code> · <code>stopAll()</code> — silence one channel or everything<br/>
+        <code>s([1,2,3])</code> — make a sequins (cycles forever)<br/>
+        <code>scales.major / minor / pentatonic / dorian / chromatic</code><br/>
+        <code>scales.akebono / hijaz / kurd / bayati / rast / zen / wuSheng</code><br/>
+        <code>refresh()</code> — redraw the grid after direct state writes<br/>
+        <h3>direct state</h3>
+        <code>engine.channels[0].note = s([0,4,7])</code><br/>
+        <code>setScale(scales.akebono)</code> or <code>engine.scale = scales.akebono; refresh()</code><br/>
+        <code>engine.quantize = 16</code> — per-fire snap grid (0 = off · events per whole note)<br/>
+        <code>engine.launchGrid = 4</code> — launch alignment grid (0 = off)<br/>
+        <h3>examples</h3>
+        <code>launch(1, 8, 4, 2)</code><br/>
+        <code>setScale(scales.major); launch(1, s([4,3]), -1, s([0,4,7]), 0.7)</code><br/>
+        <code>launch(1, 8, s([4,3]), s([0,4,7]), s([1,0.5]), s([2,2,7]))</code>
+      </div> -->
 
       <!-- debug panel: hidden by default, shown in debug mode -->
       <section class="repl">
