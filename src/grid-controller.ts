@@ -38,7 +38,7 @@ type ParamName = 'div' | 'reps' | 'note' | 'level' | 'harm' | 'env';
 const PARAMS: ParamName[] = ['div', 'reps', 'note', 'level', 'harm', 'env'];
 
 // Row 7 buttons
-const VOICE_TOGGLE_COL     = 11;  // toggle voice engine (JF additive ↔ FM) per channel
+const VOICE_TOGGLE_COL     = 11;  // cycle voice engine: FM → JF → Mangrove per channel
 const CLR_BUTTON_COL       = 12;  // clear selected param on a channel
 const LOCK_BUTTON_COL      = 13;  // toggle locked (equal-length) mode per channel
 const RANDOMIZE_BUTTON_COL = 14;
@@ -374,6 +374,14 @@ export class GridController {
     } else {
       const key = (param + 'B') as keyof ChannelState;
       (c as unknown as Record<string, Sequins<number>>)[key] = sequins(final);
+    }
+    // Shared INTONE: harm on a JF channel is the global INTONE knob — broadcast to all JF channels.
+    if (param === 'harm' && layer === 'A' && c.voiceType === 'jf') {
+      for (let i = 0; i < NUM_CHANNELS; i++) {
+        if (i !== ch && this.engine.channels[i].voiceType === 'jf') {
+          this.engine.channels[i].harm = sequins(final);
+        }
+      }
     }
     const logVals = param === 'env' ? final.map(v => Math.round(v * 31)) : final;
     console.log(`[ch${ch + 1} ${param}${layer === 'B' ? 'B' : ''}] s(${JSON.stringify(logVals)})`);
@@ -962,7 +970,7 @@ export class GridController {
     }
     if (this.actionMode === 'voice') {
       const states = this.engine.channels.map((c, i) => `ch${i + 1}:${c.voiceType.toUpperCase()}`).join(' ');
-      this.statusEl.textContent = `VOICE — bright=MG · med=JF · dim=FM · tap a channel to cycle · ${states} — tap VOICE again to exit`;
+      this.statusEl.textContent = `VOICE — bright=MG · dim=FM · tap a channel to cycle · ${states} — tap VOICE again to exit`;
       return;
     }
     if (this.actionMode === 'lock') {

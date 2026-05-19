@@ -4,6 +4,7 @@ import { scales, degreeToFreq } from './scales';
 import { getBeats, waitUntilBeat } from './clock';
 import { snapBeat } from './quantize';
 import type { Voice } from './voice';
+import { JFVoice } from './jf-voice';
 
 export const NUM_CHANNELS = 6;
 
@@ -12,9 +13,9 @@ export interface ChannelState {
   reps: Sequins<number>;
   note: Sequins<number>;
   level: Sequins<number>;
-  // FM modulator-to-carrier frequency ratio, advanced once per burst (like
-  // note and level). Integer ratios produce harmonic spectra; non-integer
-  // ratios produce inharmonic / metallic timbres.
+  // FM: modulator-to-carrier frequency ratio (integer = harmonic, non-integer = metallic).
+  // JF: shared INTONE — controls harmonic spread across the 6 slope channels
+  //     (harm=2 → all in unison; harm=24 → slopes at 1:2:3:4:5:6 ratios).
   harm: Sequins<number>;
   // Envelope shape, 0..1. 0 = snappy default (current behaviour). 1 = longer
   // attack and decay while still in percussive territory.
@@ -36,13 +37,14 @@ export interface ChannelState {
   probHit: boolean;
   // Envelope timing mode: 0=shape 1=burst 2=hit
   envMode: 0 | 1 | 2;
-  // Geode amplitude mode: 0=off 1=transient 2=sustain 3=cycle
+  // Geode amplitude mode: 0=off 1=transient (saw) 2=sustain (decay) 3=cycle (sine)
   geodeMode: 0 | 1 | 2 | 3;
-  // Pitch envelope mode: 0=off 1=fast 2=med 3=slow
-  // Sweeps carrier (and modulator) from a higher frequency down to the target pitch.
+  // Pitch geode mode: 0=off 1=transient 2=sustain 3=cycle.
+  // Modulates per-hit frequency across the burst using the same geodeMod patterns.
+  // level drives depth/direction: 0.5=no modulation, range ±1 octave around target.
   pitchEnv: 0 | 1 | 2 | 3;
-  // Harmonicity envelope mode: 0=off 1=fast 2=med 3=slow
-  // Sweeps modulator frequency from a more inharmonic ratio down to the target harm value.
+  // Harm geode mode: 0=off 1=transient 2=sustain 3=cycle.
+  // Modulates per-hit harmonicity across the burst, sweeping between unison and target harm.
   harmEnv: 0 | 1 | 2 | 3;
   // When true, all A-layer parameters are kept at the same sequence length.
   // Extends or truncates sibling params whenever one param's length changes.
@@ -103,9 +105,10 @@ function defaultChannel(): ChannelState {
 // Rhythmically meaningful divisors for randomize/mutate operations.
 const MUSICAL_DIVS = [2, 3, 4, 6, 8, 12, 16] as const;
 
-// Geode-style per-hit amplitude. `run` is the level param interpreted as a
-// bipolar RUN CV: 0.5 = neutral (0V), 0 = full negative, 1 = full positive.
-function geodeAmplitude(mode: 1 | 2 | 3, run: number, i: number, total: number): number {
+// Geode-style per-hit modulation. `run` is interpreted as a bipolar RUN CV:
+// 0.5 = neutral (0V / no modulation), 0 = full negative, 1 = full positive.
+// Returns 0..1; at run≈0.5 always returns 1.0 (no-op for all three modes).
+function geodeMod(mode: 1 | 2 | 3, run: number, i: number, total: number): number {
   const r = (run - 0.5) * 2;  // -1..+1
 
   if (mode === 1) {  // Transient: sawtooth accent cycle
@@ -262,15 +265,17 @@ export class BurstEngine {
     const ch = ch1 - 1;
     if (ch < 0 || ch >= NUM_CHANNELS) return;
     const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const ri = (n: number) => Math.floor(Math.random() * n);
     const len = pick([2, 3, 4] as const);
     const c = this.channels[ch];
+    // All values use the same discrete sets as the grid's STEP_PICKER_VALUES.
     c.div   = sequins(Array.from({ length: len }, () => pick(MUSICAL_DIVS)));
     c.reps  = sequins(Array.from({ length: len }, () => pick([1, 2, 2, 3, 4] as const)));
-    c.note  = sequins(Array.from({ length: len }, () => Math.floor(Math.random() * 8)));
+    c.note  = sequins(Array.from({ length: len }, () => ri(16)));
     const tLen = c.locked ? len : 1;
-    c.level = sequins(Array.from({ length: tLen }, () => 0.4 + Math.random() * 0.5));
-    c.harm  = sequins(Array.from({ length: tLen }, () => 2 + Math.random() * 0.8));
-    c.env   = sequins(Array.from({ length: tLen }, () => Math.random() * 0.6));
+    c.level = sequins(Array.from({ length: tLen }, () => (ri(16) + 1) / 32));
+    c.harm  = sequins(Array.from({ length: tLen }, () => 2 + ri(16) * 0.75));
+    c.env   = sequins(Array.from({ length: tLen }, () => ri(16) / 31));
   }
 
   // Perturb A-layer sequin values by ±amount (0..1), preserving sequence
@@ -392,12 +397,31 @@ export class BurstEngine {
   }
 
   private fire(ch: number, beat: number, freq: number, level: number, harm: number, env: number, div: number, total: number, hitIdx: number): void {
-    const { envMode, geodeMode } = this.channels[ch];
+    const { envMode, geodeMode, pitchEnv, harmEnv } = this.channels[ch];
+
+    // Clamp level to 0..1 for geode run input.
+    const geoRun = Math.max(0, Math.min(1, level));
+
     const raw = geodeMode !== 0
-      ? geodeAmplitude(geodeMode as 1 | 2 | 3, level, hitIdx, total)
+      ? geodeMod(geodeMode as 1 | 2 | 3, geoRun, hitIdx, total)
       : level;
     // Geode and env modes cause energy buildup (accent peaks, long overlap).
     const actualLevel = (geodeMode !== 0 || env > 0) ? Math.min(0.7, raw) : raw;
+
+    // Pitch geode: modulate per-hit frequency. g=1 → target, g=0 → –1 octave.
+    let geoFreq = freq;
+    if (pitchEnv > 0) {
+      const g = geodeMod(pitchEnv as 1 | 2 | 3, geoRun, hitIdx, total);
+      geoFreq = freq * Math.pow(2, g - 1);
+    }
+
+    // Harm geode: modulate per-hit harmonicity. g=1 → target harm, g=0 → unison (2).
+    let geoHarm = harm;
+    if (harmEnv > 0) {
+      const g = geodeMod(harmEnv as 1 | 2 | 3, geoRun, hitIdx, total);
+      geoHarm = 2 + g * Math.max(0, harm - 2);
+    }
+
     let decaySec: number | undefined;
     if (envMode !== 0) {
       const secPerBeat = 60 / Tone.Transport.bpm.value;
@@ -408,7 +432,13 @@ export class BurstEngine {
     }
     const vt = this.channels[ch].voiceType;
     const voice = vt === 'fm' ? this.fmVoices[ch] : vt === 'jf' ? this.jfVoices[ch] : this.mgVoices[ch];
-    voice.triggerAt(Tone.now(), freq, actualLevel, harm, env, decaySec, this.channels[ch].pitchEnv, this.channels[ch].harmEnv);
-    this.emit({ type: 'fire', ch, beat, freq, level: actualLevel, harm, env });
+    if (vt === 'jf') {
+      // Pass channel index as slopeIndex so each channel plays its JF slope identity
+      // (ch0=IDENTITY, ch1=2N, ..., ch5=6N) at the appropriate harmonic frequency.
+      (voice as JFVoice).triggerAt(Tone.now(), geoFreq, actualLevel, geoHarm, env, decaySec, ch);
+    } else {
+      voice.triggerAt(Tone.now(), geoFreq, actualLevel, geoHarm, env, decaySec);
+    }
+    this.emit({ type: 'fire', ch, beat, freq: geoFreq, level: actualLevel, harm: geoHarm, env });
   }
 }

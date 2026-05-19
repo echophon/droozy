@@ -16,14 +16,15 @@ export interface JFVoiceParams {
 }
 
 export const defaultJFVoiceParams: JFVoiceParams = {
-  slopes: 4,
-  ampDecay: 0.4,
+  slopes: 1,
+  ampDecay: 0.2,
   curve: 'sawtooth',
 };
 
 interface JFPoolVoice {
   oscillators: Tone.Oscillator[];
   oscGains: Tone.Gain[];
+  filter: Tone.Filter;
   ampEnv: Tone.AmplitudeEnvelope;
   voiceOut: Tone.Gain;
 }
@@ -33,19 +34,15 @@ export class JFVoice {
   private out: Tone.Gain;
 
   private static readonly POOL_SIZE = 8;
-  // RAMP table: attack fraction of total envelope duration.
-  // 0 = fully percussive; 0.5 = symmetric swell (bell-like).
-  private static readonly RAMP_TABLE = [0, 0.15, 0.35, 0.5] as const;
-  // Pitch sweep — same tables as FMVoice so pitchEnv behaves identically.
-  private static readonly PITCH_SWEEP_START = [1, 4, 2, 1.5] as const;
-  private static readonly PITCH_SWEEP_TIME  = [0, 0.03, 0.12, 0.35] as const;
 
   private pool: JFPoolVoice[];
   private poolIndex = 0;
 
   constructor(destination: Tone.InputNode, params: JFVoiceParams = defaultJFVoiceParams) {
     this.params = { ...params };
-    this.out = new Tone.Gain(1).connect(destination);
+    // Normalize to match FM/MG energy: single-slope sawtooth is louder than
+    // FM's sine carrier + the old 4-slope voiceOut factor was ~0.48.
+    this.out = new Tone.Gain(0.5).connect(destination);
 
     this.pool = Array.from({ length: JFVoice.POOL_SIZE }, () =>
       this.buildPoolVoice(),
@@ -66,11 +63,20 @@ export class JFVoice {
       release: 0.01,
     }).connect(voiceOut);
 
+    // LPG: 2-pole lowpass decays in tandem with the amplitude envelope,
+    // closing from a bright harmonic opening toward the fundamental.
+    const filter = new Tone.Filter({
+      type: 'lowpass',
+      frequency: 20000,
+      rolloff: -12,
+      Q: 0.5,
+    }).connect(ampEnv);
+
     const oscillators: Tone.Oscillator[] = [];
     const oscGains: Tone.Gain[] = [];
 
     for (let i = 0; i < this.params.slopes; i++) {
-      const oscGain = new Tone.Gain(weights[i]).connect(ampEnv);
+      const oscGain = new Tone.Gain(weights[i]).connect(filter);
       const osc = new Tone.Oscillator({
         type: this.params.curve,
         frequency: 220 * (i + 1),
@@ -80,27 +86,27 @@ export class JFVoice {
       oscGains.push(oscGain);
     }
 
-    return { oscillators, oscGains, ampEnv, voiceOut };
+    return { oscillators, oscGains, filter, ampEnv, voiceOut };
   }
 
   /**
    * Trigger one percussive hit.
    *
-   * harmonicity → INTONE: harmonic spread. Normalized as `harm / 24` (0..1).
-   *   At 0: all slopes unison. At 1: slopes at freq * [1, 2, 3, ... slopes].
+   * harmonicity → INTONE: harmonic spread across slopes.
+   *   harm=2 → all slopes in unison; harm=24 → 1:2:3:4:5:6 harmonic series.
    *
-   * harmEnv → RAMP: attack/decay balance preset (0–3).
-   *   0 = fully percussive (matches FMVoice default).
-   *   3 = half attack / half decay (bell/swell shape).
+   * env → envelope duration AND RAMP (attack/decay balance).
+   *   env=0 → fully percussive; env=1 → 50% attack / 50% decay (bell/swell).
    *
-   * env, decaySec → envelope duration, same semantics as FMVoice.
-   * pitchEnv → pitch sweep on all slopes (maintains harmonic ratios during sweep).
+   * decaySec → override envelope duration (from envMode in burst engine).
+   * slopeIndex → channel's JF slope identity (0=IDENTITY, 1=2N, …, 5=6N).
    */
-  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, pitchEnv?: number, harmEnv?: number): void {
+  triggerAt(when: number, freq: number, level: number, harmonicity?: number, env?: number, decaySec?: number, slopeIndex?: number): void {
     const lv = Math.max(0, Math.min(1, level));
-    const intone = harmonicity !== undefined ? Math.max(0, Math.min(1, harmonicity / 24)) : 0;
+    // harm=2 → intone=0 (all slopes in unison); harm=24 → intone=1 (1:2:3:4:5:6 harmonic series)
+    const intone = Math.max(0, Math.min(1, ((harmonicity ?? 2) - 2) / 22));
 
-    // Envelope base duration (same three-mode logic as FMVoice)
+    // Envelope base duration
     let baseAttack: number;
     let baseDec: number;
     if (decaySec !== undefined) {
@@ -109,18 +115,16 @@ export class JFVoice {
     } else if (env !== undefined) {
       const e = Math.max(0, Math.min(1, env));
       baseAttack = 0.001 + e * 0.024;
-      baseDec = 0.4 + e * 0.8;
+      baseDec = 0.2 + e * 0.4;
     } else {
       baseAttack = 0.001;
       baseDec = this.params.ampDecay;
     }
 
-    // RAMP splits total duration into attack and decay portions
-    const rampIdx = Math.max(0, Math.min(3, Math.round(harmEnv ?? 0))) as 0 | 1 | 2 | 3;
-    const rampFrac = JFVoice.RAMP_TABLE[rampIdx];
-    const totalDur = baseAttack + baseDec;
-    const attackDur = Math.max(0.001, rampFrac * totalDur);
-    const decayDur  = Math.max(0.01,  totalDur - attackDur);
+    // Use the same attack/decay split as FM so envelope length feels identical.
+    const attackDur = baseAttack;
+    const decayDur  = baseDec;
+    const totalDur  = attackDur + decayDur;
 
     const voice = this.pool[this.poolIndex];
     this.poolIndex = (this.poolIndex + 1) % JFVoice.POOL_SIZE;
@@ -128,23 +132,21 @@ export class JFVoice {
     voice.ampEnv.attack = attackDur;
     voice.ampEnv.decay  = decayDur;
 
-    const pEnv = pitchEnv ?? 0;
-    const pitchMult = pEnv > 0 ? JFVoice.PITCH_SWEEP_START[pEnv] : 1;
-    const pitchTime = pEnv > 0 ? JFVoice.PITCH_SWEEP_TIME[pEnv] : 0;
+    // LPG filter: opens to a bright harmonic cutoff on attack, decays to the
+    // fundamental over the same duration as the amplitude envelope.
+    const cutoffHigh = Math.min(18000, freq * 20);
+    const cutoffLow  = Math.max(freq, 40);
+    voice.filter.frequency.cancelScheduledValues(when);
+    voice.filter.frequency.setValueAtTime(cutoffHigh, when);
+    voice.filter.frequency.exponentialRampToValueAtTime(cutoffLow, when + decayDur);
 
-    // Schedule all slopes. The pitch sweep scales all slopes by pitchMult so
-    // harmonic relationships are preserved throughout the sweep — all slopes
-    // glide together, as JF's shared RAMP/CURVE applies across all slopes.
+    // slopeIndex is the channel's JF slope identity (0=IDENTITY, 1=2N, ..., 5=6N).
+    // Each slope plays at freq × (1 + slopeIndex × intone); additional internal
+    // oscillators (slopes > 1) stack upward from there.
+    const idx = slopeIndex ?? 0;
     for (let i = 0; i < voice.oscillators.length; i++) {
-      const targetFreq = freq * (1 + i * intone);
-      const osc = voice.oscillators[i];
-      osc.frequency.cancelScheduledValues(when);
-      if (pEnv > 0) {
-        osc.frequency.setValueAtTime(targetFreq * pitchMult, when);
-        osc.frequency.exponentialRampToValueAtTime(targetFreq, when + pitchTime);
-      } else {
-        osc.frequency.setValueAtTime(targetFreq, when);
-      }
+      const targetFreq = freq * (1 + (idx + i) * intone);
+      voice.oscillators[i].frequency.setValueAtTime(targetFreq, when);
     }
 
     voice.ampEnv.triggerAttackRelease(totalDur, when, lv);
